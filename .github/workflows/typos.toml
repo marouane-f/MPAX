@@ -1,0 +1,6 @@
+[files]
+extend-exclude = ["tests/lp_instances/"]
+
+[default.extend-words]
+mpax = "mpax"
+MPAX = "MPAX"
