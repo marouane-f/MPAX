@@ -191,7 +191,6 @@ def check_termination_criteria(
     qp_cache: CachedQuadraticProgramInfo,
     numerical_error: bool,
     elapsed_time: float,
-    eps_ratio: float,
     display_frequency: int,
     average: bool = True,
 ) -> Union[str, bool]:
@@ -212,6 +211,7 @@ def check_termination_criteria(
     Union[str, bool]
         Termination reason if criteria are met, False otherwise.
     """
+    eps_ratio = criteria.eps_abs / criteria.eps_rel
     current_iteration_stats = evaluate_unscaled_iteration_stats(
         scaled_problem,
         qp_cache,
