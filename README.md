@@ -46,7 +46,7 @@ MPAX implements two state-of-the-art first-order methods for solving LP problems
 ```python
 from mpax import create_lp, r2HPDHG
 
-lp = create_lp(c, A, l, u, var_lb, var_ub)
+lp = create_lp(c, A, b, G, h, l, u)
 solver = r2HPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
 result = solver.optimize(lp)
 ```
@@ -58,7 +58,7 @@ import jax.numpy as jnp
 from mpax import create_lp, r2HPDHG
 
 def single_optimize(c_vector):
-    lp = create_lp(c_vector, A, l, u, var_lb, var_ub)
+    lp = create_lp(c_vector, A, b, G, h, l, u)
     solver = r2HPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
     result = solver.optimize(lp)
     obj = jnp.dot(c_vector, result.primal_solution)
@@ -83,7 +83,7 @@ mesh = jax.make_mesh((2,), ('x',))
 sharding = jax.sharding.NamedSharding(mesh, P('x',))
 
 A_sharded = jax.device_put(A, sharding)
-lp_sharded = create_lp(c, A_sharded, l, u, var_lb, var_ub)
+lp_sharded = create_lp(c, A_sharded, b, G, h, l, u)
 
 solver = r2HPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
 jit_optimize = jax.jit(solver.optimize)
