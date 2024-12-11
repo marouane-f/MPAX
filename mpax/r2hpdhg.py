@@ -49,7 +49,6 @@ class r2HPDHG(raPDHG):
     optimality_norm: int = OptimalityNorm.L2
     eps_abs: float = 1e-4
     eps_rel: float = 1e-4
-    eps_ratio: float = 1.0
     eps_primal_infeasible: float = 1e-8
     eps_dual_infeasible: float = 1e-8
     # time_sec_limit: float = float("inf")
@@ -312,7 +311,6 @@ class r2HPDHG(raPDHG):
                 qp_cache,
                 solver_state.numerical_error,
                 1.0,
-                self.eps_ratio,
                 self.termination_evaluation_frequency * self.display_frequency,
                 False,
             ),
