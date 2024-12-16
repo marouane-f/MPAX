@@ -151,3 +151,14 @@ Floating-point computations on GPUs in JAX may produce non-deterministic results
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 ```
 **Important**: If you are using batch solving, do not enable `--xla_gpu_deterministic_ops=true`, as it can significantly degrade performance.
+
+## Citation
+If MPAX is useful or relevant to your research, please kindly recognize our contributions by citing our paper:
+```bibtex
+@article{lu2024mpax,
+  title={MPAX: Mathematical Programming in JAX},
+  author={Lu, Haihao and Peng, Zedong and Yang, Jinwen},
+  journal={arXiv preprint arXiv:2412.09734},
+  year={2024}
+}
+```
