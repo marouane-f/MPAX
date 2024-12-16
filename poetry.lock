@@ -138,13 +138,13 @@ files = [
 
 [[package]]
 name = "chex"
-version = "0.1.87"
+version = "0.1.88"
 description = "Chex: Testing made fun, in JAX!"
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "chex-0.1.87-py3-none-any.whl", hash = "sha256:ce536475661fd96d21be0c1728ecdbedd03f8ff950c662dfc338c92ea782cb16"},
-    {file = "chex-0.1.87.tar.gz", hash = "sha256:0096d89cc8d898bb521ef4bfbf5c24549022b0e5b301f529ab57238896fe6c5d"},
+    {file = "chex-0.1.88-py3-none-any.whl", hash = "sha256:234b61a5baa8132802e4b9c5657167d6c8a911d90a59a0bec47d537567e41b75"},
+    {file = "chex-0.1.88.tar.gz", hash = "sha256:565de897b1373232cdfca5e699f50fa49403d2c7d23f6c5a75a97ef713d2fe36"},
 ]
 
 [package.dependencies]
@@ -154,7 +154,7 @@ jaxlib = ">=0.4.27"
 numpy = ">=1.24.1"
 setuptools = {version = "*", markers = "python_version >= \"3.12\""}
 toolz = ">=0.9.0"
-typing-extensions = ">=4.2.0"
+typing_extensions = ">=4.2.0"
 
 [[package]]
 name = "colorama"
@@ -674,4 +674,4 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10"
-content-hash = "286b55f2f593e11441897859f046b78867819070032ce731125187e7e89853c1"
+content-hash = "8a51e93f4cdefcd8bf167dcf326c418f8f07d92f1c178083f9e353de6e1439f0"
