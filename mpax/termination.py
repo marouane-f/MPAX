@@ -36,8 +36,6 @@ def validate_termination_criteria(criteria: TerminationCriteria) -> None:
     #     raise ValueError("time_sec_limit must be positive.")
     if criteria.iteration_limit <= 0:
         raise ValueError("iteration_limit must be positive.")
-    if criteria.kkt_matrix_pass_limit <= 0:
-        raise ValueError("kkt_matrix_pass_limit must be positive.")
 
 
 def cached_quadratic_program_info(
@@ -262,17 +260,6 @@ def check_termination_criteria(
         (should_terminate == False)
         & (current_iteration_stats.iteration_number >= criteria.iteration_limit),
         lambda _: (True, TerminationStatus.ITERATION_LIMIT),
-        lambda _: (should_terminate, termination_status),
-        operand=None,
-    )
-
-    should_terminate, termination_status = jax.lax.cond(
-        (should_terminate == False)
-        & (
-            current_iteration_stats.cumulative_kkt_matrix_passes
-            >= criteria.kkt_matrix_pass_limit
-        ),
-        lambda _: (True, TerminationStatus.KKT_MATRIX_PASS_LIMIT),
         lambda _: (should_terminate, termination_status),
         operand=None,
     )

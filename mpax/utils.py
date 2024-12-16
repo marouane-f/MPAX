@@ -29,7 +29,6 @@ class TerminationStatus(IntEnum):
         Note: In this situation, the primal could be either unbounded or infeasible.
     TIME_LIMIT : Int
     ITERATION_LIMIT : Int
-    KKT_MATRIX_PASS_LIMIT : Int
     NUMERICAL_ERROR : Int
     INVALID_PROBLEM : Int
         Indicates that the solver detected invalid problem data.
@@ -42,7 +41,6 @@ class TerminationStatus(IntEnum):
     DUAL_INFEASIBLE = auto()
     TIME_LIMIT = auto()
     ITERATION_LIMIT = auto()
-    KKT_MATRIX_PASS_LIMIT = auto()
     NUMERICAL_ERROR = auto()
     INVALID_PROBLEM = auto()
     OTHER = auto()
@@ -89,8 +87,6 @@ class TerminationCriteria(NamedTuple):
         Time limit for the solver. Corresponding termination_status = TIME_LIMIT.
     iteration_limit : int
         Iteration limit for the solver. Corresponding termination_status = ITERATION_LIMIT.
-    kkt_matrix_pass_limit : float
-        KKT matrix pass limit for the solver. Corresponding termination_status = KKT_MATRIX_PASS_LIMIT.
     """
 
     optimality_norm: OptimalityNorm = OptimalityNorm.L2
@@ -100,7 +96,6 @@ class TerminationCriteria(NamedTuple):
     eps_dual_infeasible: float = 1.0e-8
     # time_sec_limit: float = float("inf")
     iteration_limit: int = jnp.iinfo(jnp.int32).max
-    kkt_matrix_pass_limit: float = float("inf")
 
 
 class CachedQuadraticProgramInfo(NamedTuple):
@@ -531,11 +526,6 @@ class IterationStats:
         dual infeasibility (i.e., has no solution). This field is repeated since there
         might be several different points that could establish infeasibility.
 
-    cumulative_kkt_matrix_passes : float
-        The cumulative number of passes through the KKT matrix since the start of the
-        solve. One pass is a multiply by the constraint matrix, its transpose, and the
-        matrix that defines the quadratic part of the objective.
-
     cumulative_rejected_steps : int
         The total number of rejected steps (e.g., within a line search procedure) since
         the start of the solve.
@@ -559,7 +549,6 @@ class IterationStats:
     iteration_number: int = 0
     convergence_information: ConvergenceInformation = None
     infeasibility_information: InfeasibilityInformation = None
-    cumulative_kkt_matrix_passes: float = 0.0
     cumulative_rejected_steps: int = 0
     cumulative_time_sec: float = 0.0
     step_size: float = 0.0
@@ -603,7 +592,6 @@ class PdhgSolverState:
     step_size: float
     primal_weight: float
     numerical_error: bool
-    cumulative_kkt_passes: float
     # total_number_iterations: int
     num_steps_tried: int
     num_iterations: int

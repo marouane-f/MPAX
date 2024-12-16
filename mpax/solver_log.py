@@ -264,7 +264,7 @@ def display_iteration_stats_heading():
     """
     if logging.root.level == logging.INFO:
         jax_debug_log(
-            "{:<15s} | {:<25s} | {:<25s} | {:<23s} |",
+            "{:<7s} | {:<25s} | {:<25s} | {:<23s} |",
             "runtime",
             "residuals",
             "solution information",
@@ -273,25 +273,24 @@ def display_iteration_stats_heading():
             level=logging.INFO,
         )
         jax_debug_log(
-            "{:<7s} {:<7s} | {:<8s} {:<8s} {:<7s} | {:<8s} {:<8s} {:<7s} | {:<7s} {:<7s} {:<7s} |",
+            "{:<7s} | {:<8s} {:<8s} {:<7s} | {:<8s} {:<8s} {:<7s} | {:<7s} {:<7s} {:<7s} |",
             "#iter",
-            "#kkt",
             # "seconds",
-            "pr norm",
-            "du norm",
+            "pr_norm",
+            "du_norm",
             "gap",
-            "pr obj",
-            "pr norm",
-            "du norm",
-            "rel pr",
-            "rel du",
-            "rel gap",
+            "pr_obj",
+            "pr_norm",
+            "du_norm",
+            "rel_pr",
+            "rel_du",
+            "rel_gap",
             logger=logger,
             level=logging.INFO,
         )
     elif logging.root.level == logging.DEBUG:
         jax_debug_log(
-            "{:<15s} | {:<25s} | {:<25s} | {:<23s} | {:<16s} | {:<17s} |",
+            "{:<7s} | {:<25s} | {:<25s} | {:<23s} | {:<16s} | {:<17s} |",
             "runtime",
             "residuals",
             "solution information",
@@ -302,23 +301,22 @@ def display_iteration_stats_heading():
             level=logging.DEBUG,
         )
         jax_debug_log(
-            "{:<7s} {:<7s} | {:<8s} {:<8s} {:<7s} | {:<8s} {:<8s} {:<7s} | {:<7s} {:<7s} {:<7s} | {:<8s} {:<7s} | {:<8s} {:<8s} |",
+            "{:<7s} | {:<8s} {:<8s} {:<7s} | {:<8s} {:<8s} {:<7s} | {:<7s} {:<7s} {:<7s} | {:<8s} {:<7s} | {:<8s} {:<8s} |",
             "#iter",
-            "#kkt",
             # "seconds",
-            "pr norm",
-            "du norm",
+            "pr_norm",
+            "du_norm",
             "gap",
-            "pr obj",
-            "pr norm",
-            "du norm",
-            "rel pr",
-            "rel du",
-            "rel gap",
-            "pr norm",
+            "pr_obj",
+            "pr_norm",
+            "du_norm",
+            "rel_pr",
+            "rel_du",
+            "rel_gap",
+            "pr_norm",
             "linear",
-            "du norm",
-            "dual obj",
+            "du_norm",
+            "dual_obj",
             logger=logger,
             level=logging.DEBUG,
         )
@@ -359,9 +357,8 @@ def display_iteration_stats(stats, solver_state):
     infeas_info = stats.infeasibility_information
     if logging.root.level == logging.DEBUG:
         jax_debug_log(
-            "{:-6d}  {:.1e} | {:.1e}  {:.1e}  {:.1e} | {:.1e}  {:.1e}  {:.1e} | {:.1e} {:.1e} {:.1e} | {:.1e}  {:.1e} | {:.1e}  {:.1e}  |",
+            "{:-7d} | {:.1e}  {:.1e}  {:.1e} | {:.1e}  {:.1e}  {:.1e} | {:.1e} {:.1e} {:.1e} | {:.1e}  {:.1e} | {:.1e}  {:.1e}  |",
             stats.iteration_number,
-            stats.cumulative_kkt_matrix_passes,
             # stats.cumulative_time_sec,
             conv_info.l2_primal_residual,
             conv_info.l2_dual_residual,
@@ -396,9 +393,8 @@ def display_iteration_stats(stats, solver_state):
         )
     elif logging.root.level == logging.INFO:
         jax_debug_log(
-            "{:-6d}  {:.1e} | {:.1e}  {:.1e}  {:.1e} | {:.1e}  {:.1e}  {:.1e} | {:.1e} {:.1e} {:.1e} |",
+            "{:-7d} | {:.1e}  {:.1e}  {:.1e} | {:.1e}  {:.1e}  {:.1e} | {:.1e} {:.1e} {:.1e} |",
             stats.iteration_number,
-            stats.cumulative_kkt_matrix_passes,
             # stats.cumulative_time_sec,
             conv_info.l2_primal_residual,
             conv_info.l2_dual_residual,
