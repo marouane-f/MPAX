@@ -1,4 +1,5 @@
 import timeit
+from pathlib import Path
 
 import gurobipy as gp
 import jax
@@ -14,11 +15,12 @@ from mpax.mp_io import create_lp, create_lp_from_gurobi
 from mpax.rapdhg import raPDHG
 
 config.update("jax_enable_x64", True)
+pytest_cache_dir = str(Path(__file__).parent.parent / ".pytest_cache")
 
 
 def test_rapdhg():
     """Test the raPDHG solver on a sample LP problem."""
-    gurobi_model = gp.read("tests/lp_instances/gen-ip054.mps")
+    gurobi_model = gp.read(pytest_cache_dir + "/gen-ip054.mps")
     lp = create_lp_from_gurobi(gurobi_model)
     solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6)
     result = solver.optimize(lp)
@@ -33,7 +35,7 @@ def test_rapdhg():
 
 def test_rapdhg_with_jit():
     """Test the raPDHG solver on a sample LP problem."""
-    gurobi_model = gp.read("tests/lp_instances/gen-ip054.mps")
+    gurobi_model = gp.read(pytest_cache_dir + "/gen-ip054.mps")
     lp = create_lp_from_gurobi(gurobi_model)
     solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6)
     jit_optimize = jit(solver.optimize)
@@ -49,7 +51,7 @@ def test_rapdhg_with_jit():
 
 def test_rapdhg_with_vmap():
     """Test the raPDHG solver on a batch of LP problems."""
-    var, prob = LpProblem.fromMPS("tests/lp_instances/gen-ip054.mps")
+    var, prob = LpProblem.fromMPS(pytest_cache_dir + "/gen-ip054.mps")
     c, integrality, constraints, bounds = convert_all(prob)
     c = jnp.array(c)
     constraint_lb = jnp.array(constraints.lb)
@@ -123,7 +125,7 @@ def test_rapdhg_with_sharding():
     mesh = jax.make_mesh((2,), ('x',))
     sharding = jax.sharding.NamedSharding(mesh, P('x'))
 
-    gurobi_model = gp.read("tests/lp_instances/flugpl.mps")
+    gurobi_model = gp.read(pytest_cache_dir + "/flugpl.mps")
     lp_sharded = create_lp_from_gurobi(gurobi_model, sharding=sharding)
     jax.debug.visualize_array_sharding(lp_sharded.constraint_matrix)
 
