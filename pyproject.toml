@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mpax"
-version = "0.1.0"
+version = "0.1.1"
 description = "MPAX: Mathematical Programming in JAX"
 authors = ["Zedong Peng <zdpeng95@gmail.com>"]
 license = "MIT"
