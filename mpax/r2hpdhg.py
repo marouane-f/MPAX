@@ -53,7 +53,6 @@ class r2HPDHG(raPDHG):
     eps_dual_infeasible: float = 1e-8
     # time_sec_limit: float = float("inf")
     iteration_limit: int = jnp.iinfo(jnp.int32).max
-    kkt_matrix_pass_limit: int = jnp.iinfo(jnp.int32).max
     l_inf_ruiz_iterations: int = 10
     l2_norm_rescaling: bool = False
     pock_chambolle_alpha: float = 1.0
@@ -147,7 +146,6 @@ class r2HPDHG(raPDHG):
             step_size=step_size,
             primal_weight=solver_state.primal_weight,
             numerical_error=False,
-            cumulative_kkt_passes=solver_state.cumulative_kkt_passes + line_search_iter,
             num_steps_tried=solver_state.num_steps_tried + line_search_iter,
             num_iterations=solver_state.num_iterations + 1,
             termination_status=TerminationStatus.UNSPECIFIED,
@@ -203,7 +201,6 @@ class r2HPDHG(raPDHG):
             step_size=solver_state.step_size,
             primal_weight=solver_state.primal_weight,
             numerical_error=False,
-            cumulative_kkt_passes=solver_state.cumulative_kkt_passes,
             num_steps_tried=solver_state.num_steps_tried,
             num_iterations=solver_state.num_iterations - 1,
             termination_status=TerminationStatus.UNSPECIFIED,

@@ -552,7 +552,6 @@ def perform_restart(
         step_size=solver_state.step_size,
         primal_weight=new_primal_weight,
         numerical_error=solver_state.numerical_error,
-        cumulative_kkt_passes=solver_state.cumulative_kkt_passes + 2,
         num_steps_tried=solver_state.num_steps_tried,
         num_iterations=solver_state.num_iterations,
         termination_status=solver_state.termination_status,

@@ -183,7 +183,7 @@ def line_search(
     Returns
     -------
     tuple
-        The total number of iterations, cumulative KKT passes, delta primal, delta dual, delta primal product, and step size.
+        The delta_primal, delta_dual, delta_primal_product, step_size, and line_search_iter.
     """
 
     def cond_fun(line_search_state):
@@ -286,7 +286,6 @@ class raPDHG(abc.ABC):
     eps_dual_infeasible: float = 1e-8
     # time_sec_limit: float = float("inf")
     iteration_limit: int = jnp.iinfo(jnp.int32).max
-    kkt_matrix_pass_limit: int = jnp.iinfo(jnp.int32).max
     l_inf_ruiz_iterations: int = 10
     l2_norm_rescaling: bool = False
     pock_chambolle_alpha: float = 1.0
@@ -313,7 +312,6 @@ class raPDHG(abc.ABC):
             eps_dual_infeasible=self.eps_dual_infeasible,
             # time_sec_limit=self.time_sec_limit,
             iteration_limit=self.iteration_limit,
-            kkt_matrix_pass_limit=self.kkt_matrix_pass_limit,
         )
         self._restart_params = RestartParameters(
             restart_scheme=self.restart_scheme,
@@ -347,7 +345,6 @@ class raPDHG(abc.ABC):
 
         # Step size computation
         if self.adaptive_step_size:
-            cumulative_kkt_passes = 0.5
             step_size = 1.0 / jnp.max(jnp.abs(scaled_qp.constraint_matrix.data))
         else:
             desired_relative_error = 0.2
@@ -359,7 +356,6 @@ class raPDHG(abc.ABC):
                 )
             )
             step_size = (1 - desired_relative_error) / maximum_singular_value
-            cumulative_kkt_passes = number_of_power_iterations
 
         # Primal weight initialization
         if self.scale_invariant_initial_primal_weight:
@@ -379,7 +375,6 @@ class raPDHG(abc.ABC):
             step_size=step_size,
             primal_weight=primal_weight,
             numerical_error=False,
-            cumulative_kkt_passes=cumulative_kkt_passes,
             # total_number_iterations=0,
             avg_primal_solution=jnp.zeros(primal_size),
             avg_dual_solution=jnp.zeros(dual_size),
@@ -493,7 +488,6 @@ class raPDHG(abc.ABC):
             step_size=step_size,
             primal_weight=solver_state.primal_weight,
             numerical_error=False,
-            cumulative_kkt_passes=solver_state.cumulative_kkt_passes + line_search_iter,
             num_steps_tried=solver_state.num_steps_tried + line_search_iter,
             num_iterations=solver_state.num_iterations + 1,
             termination_status=TerminationStatus.UNSPECIFIED,

@@ -467,7 +467,6 @@ def evaluate_unscaled_iteration_stats(
         iteration_number=solver_state.num_iterations,
         convergence_information=convergence_information,
         infeasibility_information=infeasibility_information,
-        cumulative_kkt_matrix_passes=solver_state.cumulative_kkt_passes,
         cumulative_rejected_steps=0,  # cumulative_rejected_steps
         cumulative_time_sec=cumulative_time,
         step_size=solver_state.step_size,
