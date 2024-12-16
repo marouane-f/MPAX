@@ -18,6 +18,7 @@ pytest = "^8.3.4"
 gurobipy = "^11.0.0"
 pulp = "^2.9.0"
 pulp2mat = "^0.1.5"
+requests = "^2.32.3"
 
 [build-system]
 requires = ["poetry-core"]
