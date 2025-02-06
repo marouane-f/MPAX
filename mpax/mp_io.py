@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.experimental.sparse import BCOO, BCSR, bcoo_concatenate, empty
+from scipy.sparse import sparray, spmatrix
 
 from mpax.utils import QuadraticProgrammingProblem, TwoSidedQpProblem
 
@@ -164,7 +165,79 @@ def two_sided_rows_to_slacks(qp: TwoSidedQpProblem) -> None:
     )
 
 
-def create_lp(c, A, b, G, h, l, u):
+def transform_to_bcoo(input_matrix):
+    """Transform the input matrix to the BCOO format.
+
+    Parameters
+    ----------
+    input_matrix :
+        The input matrix to be transformed.
+
+    Returns
+    -------
+    BCOO
+        The matrix in BCOO format.
+
+    Raises
+    ------
+    ValueError
+        The input matrix format is not supported.
+    """
+    if isinstance(input_matrix, (jnp.ndarray, np.ndarray)):
+        bcoo_matrix = BCOO.fromdense(
+            input_matrix, nse=input_matrix.shape[0] * input_matrix.shape[1]
+        )
+    elif isinstance(input_matrix, BCSR):
+        bcoo_matrix = input_matrix.to_bcoo()
+    elif isinstance(input_matrix, (sparray, spmatrix)):
+        bcoo_matrix = BCOO.from_scipy_sparse(input_matrix)
+    elif isinstance(input_matrix, BCOO):
+        bcoo_matrix = input_matrix
+    else:
+        raise ValueError(
+            "Unsupported matrix format. "
+            "The constraint matrix must be one of the following types: "
+            "jnp.ndarray, numpy.ndarray, BCOO, or BCSR."
+        )
+    return bcoo_matrix
+
+
+def transform_to_jnp_array(input_matrix):
+    """Transform the input matrix to the BCOO format.
+
+    Parameters
+    ----------
+    input_matrix :
+        The input matrix to be transformed.
+
+    Returns
+    -------
+    jnp.ndarray
+        The matrix in jnp.ndarray format.
+
+    Raises
+    ------
+    ValueError
+        The input matrix format is not supported.
+    """
+    if isinstance(input_matrix, (BCOO, BCSR)):
+        output_matrix = input_matrix.todense()
+    elif isinstance(input_matrix, np.ndarray):
+        output_matrix = jnp.array(input_matrix)
+    elif isinstance(input_matrix, (sparray, spmatrix)):
+        output_matrix = jnp.array(input_matrix.toarray())
+    elif isinstance(input_matrix, jnp.ndarray):
+        output_matrix = input_matrix
+    else:
+        raise ValueError(
+            "Unsupported matrix format. "
+            "The constraint matrix must be one of the following types: "
+            "jnp.ndarray, BCOO, or BCSR."
+        )
+    return output_matrix
+
+
+def create_lp(c, A, b, G, h, l, u, use_sparse_matrix=True):
     """Create a boxed linear program from arrays.
             max  cx
             s.t. Ax = b
@@ -187,38 +260,27 @@ def create_lp(c, A, b, G, h, l, u):
         The lower bound of the variables.
     u : jnp.ndarray
         The upper bound of the variables.
+    use_sparse_matrix: bool
+        Whether to use sparse matrix format, by default True.
 
     Returns
     -------
     QuadraticProgrammingProblem
         The boxed linear program.
     """
-    if isinstance(A, jnp.ndarray):
-        A = BCOO.fromdense(A, nse=A.shape[0] * A.shape[1])
-    elif isinstance(A, BCSR):
-        A = A.to_bcoo()
-    elif isinstance(A, BCOO):
-        pass
-    else:
-        raise ValueError(
-            "Unsupported matrix format. "
-            "The constraint matrix must be one of the following types: "
-            "jnp.ndarray, BCOO, or BCSR."
+    if use_sparse_matrix:
+        constraint_matrix = bcoo_concatenate(
+            [transform_to_bcoo(A), transform_to_bcoo(G)], dimension=0
         )
+        objective_matrix = empty(
+            shape=(len(c), len(c)), dtype=float, sparse_format="bcoo"
+        )
+    else:
+        constraint_matrix = jnp.concatenate(
+            [transform_to_jnp_array(A), transform_to_jnp_array(G)], axis=0
+        )
+        objective_matrix = jnp.empty(shape=(len(c), len(c)), dtype=float)
 
-    if isinstance(G, jnp.ndarray):
-        G = BCOO.fromdense(G, nse=G.shape[0] * G.shape[1])
-    elif isinstance(G, BCSR):
-        G = G.to_bcoo()
-    elif isinstance(G, BCOO):
-        pass
-    else:
-        raise ValueError(
-            "Unsupported matrix format. "
-            "The constraint matrix must be one of the following types: "
-            "jnp.ndarray, BCOO, or BCSR."
-        )
-    constraint_matrix = bcoo_concatenate([A, G], dimension=0)
     problem = QuadraticProgrammingProblem(
         num_variables=c.shape[0],
         num_constraints=A.shape[0] + G.shape[0],
@@ -226,13 +288,11 @@ def create_lp(c, A, b, G, h, l, u):
         variable_upper_bound=jnp.array(u),
         isfinite_variable_lower_bound=jnp.isfinite(l),
         isfinite_variable_upper_bound=jnp.isfinite(u),
-        objective_matrix=empty(
-            shape=(len(c), len(c)), dtype=float, sparse_format="bcoo"
-        ),
+        objective_matrix=objective_matrix,
         objective_vector=jnp.array(c),
         objective_constant=0.0,
-        constraint_matrix=BCSR.from_bcoo(constraint_matrix),
-        constraint_matrix_t=BCSR.from_bcoo(constraint_matrix.T),
+        constraint_matrix=constraint_matrix,
+        constraint_matrix_t=constraint_matrix.T,
         right_hand_side=jnp.concatenate([b, h]),
         num_equalities=b.shape[0],
         equalities_mask=jnp.concatenate(
@@ -245,37 +305,48 @@ def create_lp(c, A, b, G, h, l, u):
     return problem
 
 
-def create_lp_from_gurobi(model, sharding=None) -> QuadraticProgrammingProblem:
+def create_lp_from_gurobi(
+    model, use_sparse_matrix=True, sharding=None
+) -> QuadraticProgrammingProblem:
     """Transforms a gurobi model to a standard form.
 
     Parameters
     ----------
     model : gurobipy.Model
         The gurobi model to transform.
+    use_sparse_matrix : bool
+        Whether to use sparse matrix format, by default True.
+    sharding : jax.sharding.Sharding
+        The sharding to use, by default None.
 
     Returns
     -------
     QuadraticProgrammingProblem
         The standard form of the problem.
     """
-    if sharding is None:
-        constraint_matrix = BCOO.from_scipy_sparse(model.getA())
-    else:
-        constraint_matrix = jax.device_put(
-            BCOO.from_scipy_sparse(model.getA()), sharding
-        )
     constraint_sense = np.array(model.getAttr("Sense", model.getConstrs()))
-    leq_mask = constraint_sense == "<"
-    equalities_mask = constraint_sense == "="
+    leq_mask = jnp.array(constraint_sense == "<")
+    equalities_mask = jnp.array(constraint_sense == "=")
 
     # Flip the signs of the leq rows in place
-    constraint_rhs = np.array(model.getAttr("RHS", model.getConstrs()))
-    constraint_rhs = np.where(leq_mask, -constraint_rhs, constraint_rhs)
-    row_indices = constraint_matrix.indices[:, 0]
-    leq_nzval_mask = jnp.take(jnp.array(leq_mask), row_indices)
-    constraint_matrix.data = jnp.where(
-        leq_nzval_mask, -constraint_matrix.data, constraint_matrix.data
-    )
+    constraint_rhs = jnp.array(model.getAttr("RHS", model.getConstrs()))
+    constraint_rhs = jnp.where(leq_mask, -constraint_rhs, constraint_rhs)
+
+    if use_sparse_matrix:
+        constraint_matrix = BCOO.from_scipy_sparse(model.getA())
+        row_indices = constraint_matrix.indices[:, 0]
+        leq_nzval_mask = jnp.take(jnp.array(leq_mask), row_indices)
+        constraint_matrix.data = jnp.where(
+            leq_nzval_mask, -constraint_matrix.data, constraint_matrix.data
+        )
+    else:
+        constraint_matrix = jnp.array(model.getA().toarray())
+        constraint_matrix = constraint_matrix.at[leq_mask].set(
+            -constraint_matrix[leq_mask]
+        )
+
+    if sharding is not None:
+        constraint_matrix = jax.device_put(constraint_matrix, sharding)
 
     var_lb = jnp.array(model.getAttr("LB", model.getVars()))
     var_ub = jnp.array(model.getAttr("UB", model.getVars()))
@@ -295,8 +366,8 @@ def create_lp_from_gurobi(model, sharding=None) -> QuadraticProgrammingProblem:
         ),
         objective_vector=objective_vector,
         objective_constant=objective_constant,
-        constraint_matrix=BCSR.from_bcoo(constraint_matrix),
-        constraint_matrix_t=BCSR.from_bcoo(constraint_matrix.T),
+        constraint_matrix=constraint_matrix,
+        constraint_matrix_t=constraint_matrix.T,
         right_hand_side=constraint_rhs,
         num_equalities=jnp.sum(equalities_mask),
         equalities_mask=equalities_mask,

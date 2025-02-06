@@ -5,12 +5,13 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-from jax.experimental.sparse import BCSR
+from jax.experimental.sparse import BCSR, BCOO
 
 from mpax.loop_utils import while_loop
 from mpax.preprocess import rescale_problem
 from mpax.restart import (
     run_restart_scheme,
+    run_restart_scheme_feasibility_polishing,
     select_initial_primal_weight,
     unscaled_saddle_point_output,
 )
@@ -19,7 +20,12 @@ from mpax.solver_log import (
     pdhg_final_log,
     setup_logger,
 )
-from mpax.termination import cached_quadratic_program_info, check_termination_criteria
+from mpax.termination import (
+    cached_quadratic_program_info,
+    check_termination_criteria,
+    check_primal_feasibility,
+    check_dual_feasibility,
+)
 from mpax.utils import (
     OptimalityNorm,
     PdhgSolverState,
@@ -31,6 +37,14 @@ from mpax.utils import (
     SaddlePointOutput,
     TerminationCriteria,
     TerminationStatus,
+    ScaledQpProblem,
+)
+from mpax.iteration_stats_utils import evaluate_unscaled_iteration_stats
+from mpax.feasibility_polishing import (
+    init_primal_feasibility_polishing,
+    set_dual_solution_to_zero,
+    init_dual_feasibility_polishing,
+    set_primal_solution_to_zero,
 )
 
 logger = logging.getLogger(__name__)
@@ -302,6 +316,9 @@ class raPDHG(abc.ABC):
     adaptive_step_size_reduction_exponent: float = 0.3
     adaptive_step_size_growth_exponent: float = 0.6
     adaptive_step_size_limit_coef: float = 1.0
+    warm_start: bool = False
+    feasibility_polishing: bool = False
+    polishing_eps: float = 1e-06
 
     def check_config(self):
         self._termination_criteria = TerminationCriteria(
@@ -322,30 +339,49 @@ class raPDHG(abc.ABC):
             necessary_reduction_for_restart=self.necessary_reduction_for_restart,
             primal_weight_update_smoothing=self.primal_weight_update_smoothing,
         )
+        self._polishing_termination_criteria = TerminationCriteria(
+            optimality_norm=self.optimality_norm,
+            eps_abs=self.polishing_eps,
+            eps_rel=self.polishing_eps,
+            eps_primal_infeasible=self.eps_primal_infeasible,
+            eps_dual_infeasible=self.eps_dual_infeasible,
+            iteration_limit=self.iteration_limit,
+        )
 
     def initialize_solver_status(
-        self, scaled_qp: QuadraticProgrammingProblem
+        self,
+        scaled_problem: ScaledQpProblem,
+        initial_primal_solution: jnp.array,
+        initial_dual_solution: jnp.array,
     ) -> PdhgSolverState:
         """Initialize the solver status for PDHG.
 
         Parameters
         ----------
-        scaled_qp : QuadraticProgrammingProblem
-            The scaled quadratic programming problem.
-        params : PdhgParameters
-            The parameters for the PDHG algorithm.
+        scaled_problem : ScaledQpProblem
+            Scaled quadratic programming problem instance.
+        initial_primal_solution : jnp.array
+            The initial primal solution.
+        initial_dual_solution : jnp.array
+            The initial dual solution.
 
         Returns
         -------
         PdhgSolverState
             The initial solver status.
         """
+        scaled_qp = scaled_problem.scaled_qp
         primal_size = len(scaled_qp.variable_lower_bound)
         dual_size = len(scaled_qp.right_hand_side)
 
         # Step size computation
         if self.adaptive_step_size:
-            step_size = 1.0 / jnp.max(jnp.abs(scaled_qp.constraint_matrix.data))
+            if isinstance(scaled_qp.constraint_matrix, (BCOO, BCSR)):
+                step_size = 1.0 / jnp.max(jnp.abs(scaled_qp.constraint_matrix.data))
+            elif isinstance(scaled_qp.constraint_matrix, jnp.ndarray):
+                step_size = 1.0 / jnp.max(jnp.abs(scaled_qp.constraint_matrix))
+            else:
+                raise ValueError("Unsupported matrix type.")
         else:
             desired_relative_error = 0.2
             maximum_singular_value, number_of_power_iterations = (
@@ -359,31 +395,49 @@ class raPDHG(abc.ABC):
 
         # Primal weight initialization
         if self.scale_invariant_initial_primal_weight:
-            primal_weight = select_initial_primal_weight(
+            self._initial_primal_weight = select_initial_primal_weight(
                 scaled_qp, 1.0, 1.0, self.primal_importance
             )
         else:
-            primal_weight = self.primal_importance
+            self._initial_primal_weight = self.primal_importance
 
+        if self.warm_start:
+            scaled_initial_primal_solution = (
+                initial_primal_solution * scaled_problem.variable_rescaling
+            )
+            scaled_initial_dual_solution = (
+                initial_dual_solution * scaled_problem.constraint_rescaling
+            )
+            scaled_initial_primal_product = (
+                scaled_qp.constraint_matrix @ scaled_initial_primal_solution
+            )
+            scaled_initial_dual_product = (
+                scaled_qp.constraint_matrix_t @ scaled_initial_dual_solution
+            )
+        else:
+            scaled_initial_primal_solution = jnp.zeros(primal_size)
+            scaled_initial_dual_solution = jnp.zeros(dual_size)
+            scaled_initial_primal_product = jnp.zeros(dual_size)
+            scaled_initial_dual_product = jnp.zeros(primal_size)
         solver_state = PdhgSolverState(
-            current_primal_solution=jnp.zeros(primal_size),
-            current_dual_solution=jnp.zeros(dual_size),
-            current_primal_product=jnp.zeros(dual_size),
-            current_dual_product=jnp.zeros(primal_size),
+            current_primal_solution=scaled_initial_primal_solution,
+            current_dual_solution=scaled_initial_dual_solution,
+            current_primal_product=scaled_initial_primal_product,
+            current_dual_product=scaled_initial_dual_product,
             solutions_count=0,
             weights_sum=0.0,
             step_size=step_size,
-            primal_weight=primal_weight,
+            primal_weight=self._initial_primal_weight,
             numerical_error=False,
             # total_number_iterations=0,
-            avg_primal_solution=jnp.zeros(primal_size),
-            avg_dual_solution=jnp.zeros(dual_size),
-            avg_primal_product=jnp.zeros(dual_size),
-            avg_dual_product=jnp.zeros(primal_size),
-            initial_primal_solution=jnp.zeros(primal_size),
-            initial_dual_solution=jnp.zeros(dual_size),
-            initial_primal_product=jnp.zeros(dual_size),
-            initial_dual_product=jnp.zeros(primal_size),
+            avg_primal_solution=scaled_initial_primal_solution,
+            avg_dual_solution=scaled_initial_dual_solution,
+            avg_primal_product=scaled_initial_primal_product,
+            avg_dual_product=scaled_initial_dual_product,
+            initial_primal_solution=scaled_initial_primal_solution,
+            initial_dual_solution=scaled_initial_dual_solution,
+            initial_primal_product=scaled_initial_primal_product,
+            initial_dual_product=scaled_initial_dual_product,
             num_steps_tried=0,
             num_iterations=0,
             termination_status=TerminationStatus.UNSPECIFIED,
@@ -393,23 +447,15 @@ class raPDHG(abc.ABC):
         )
 
         last_restart_info = RestartInfo(
-            primal_solution=jnp.zeros(primal_size),
-            dual_solution=jnp.zeros(dual_size),
+            primal_solution=scaled_initial_primal_solution,
+            dual_solution=scaled_initial_dual_solution,
             primal_diff=jnp.zeros(primal_size),
             dual_diff=jnp.zeros(dual_size),
             primal_diff_product=jnp.zeros(dual_size),
-            primal_product=jnp.zeros(dual_size),
-            dual_product=jnp.zeros(primal_size),
+            primal_product=scaled_initial_primal_product,
+            dual_product=scaled_initial_dual_product,
         )
         return solver_state, last_restart_info
-
-    def should_check_termination(self, solver_state: PdhgSolverState) -> bool:
-        return (
-            (solver_state.num_iterations % self.termination_evaluation_frequency == 0)
-            | (solver_state.num_iterations == self.iteration_limit)
-            | (solver_state.num_iterations <= 10)
-            | (solver_state.numerical_error)
-        )
 
     def take_step(
         self, solver_state: PdhgSolverState, problem: QuadraticProgrammingProblem
@@ -493,7 +539,76 @@ class raPDHG(abc.ABC):
             termination_status=TerminationStatus.UNSPECIFIED,
         )
 
-    def iteration_update(
+    def take_multiple_steps(
+        self, solver_state: PdhgSolverState, problem: QuadraticProgrammingProblem
+    ) -> PdhgSolverState:
+        """
+        Take multiple PDHG step with adaptive step size.
+
+        Parameters
+        ----------
+        solver_state : PdhgSolverState
+            The current state of the solver.
+        problem : QuadraticProgrammingProblem
+            The problem being solved.
+        """
+        new_solver_state = jax.lax.fori_loop(
+            lower=0,
+            upper=self.termination_evaluation_frequency,
+            body_fun=lambda i, x: self.take_step(x, problem),
+            init_val=solver_state,
+        )
+        return new_solver_state
+
+    def initial_iteration_update(
+        self,
+        solver_state,
+        last_restart_info,
+        should_terminate,
+        scaled_problem,
+        qp_cache,
+    ):
+        """The inner loop of PDLP algorithm.
+
+        Parameters
+        ----------
+        solver_state : PdhgSolverState
+            The current state of the solver.
+        last_restart_info : RestartInfo
+            The information of the last restart.
+        should_terminate : bool
+            Whether the algorithm should terminate.
+        scaled_problem : ScaledQpProblem
+            The scaled quadratic programming problem.
+        qp_cache : CachedQuadraticProgramInfo
+            The cached quadratic programming information.
+
+        Returns
+        -------
+        tuple
+            The updated solver state, the updated last restart info, whether to terminate, the scaled problem, and the cached quadratic programming information.
+        """
+        # Skip termination check for initial iterations
+        restarted_solver_state, new_last_restart_info = run_restart_scheme(
+            scaled_problem.scaled_qp,
+            solver_state,
+            last_restart_info,
+            self._restart_params,
+        )
+
+        new_solver_state = self.take_step(
+            restarted_solver_state, scaled_problem.scaled_qp
+        )
+        new_solver_state.termination_status = TerminationStatus.UNSPECIFIED
+        return (
+            new_solver_state,
+            new_last_restart_info,
+            False,
+            scaled_problem,
+            qp_cache,
+        )
+
+    def main_iteration_update(
         self,
         solver_state,
         last_restart_info,
@@ -522,32 +637,24 @@ class raPDHG(abc.ABC):
             The updated solver state, the updated last restart info, whether to terminate, the scaled problem, and the cached quadratic programming information.
         """
         # Check for termination
-        should_terminate, termination_status = jax.lax.cond(
-            self.should_check_termination(solver_state),
-            lambda: check_termination_criteria(
-                scaled_problem,
-                solver_state,
-                self._termination_criteria,
-                qp_cache,
-                solver_state.numerical_error,
-                1.0,
-                self.termination_evaluation_frequency * self.display_frequency,
-            ),
-            lambda: (False, TerminationStatus.UNSPECIFIED),
+        should_terminate, termination_status = check_termination_criteria(
+            scaled_problem,
+            solver_state,
+            self._termination_criteria,
+            qp_cache,
+            solver_state.numerical_error,
+            1.0,
+            self.termination_evaluation_frequency * self.display_frequency,
         )
 
-        restarted_solver_state, new_last_restart_info = jax.lax.cond(
-            self.should_check_termination(solver_state),
-            lambda: run_restart_scheme(
-                scaled_problem.scaled_qp,
-                solver_state,
-                last_restart_info,
-                self._restart_params,
-            ),
-            lambda: (solver_state, last_restart_info),
+        restarted_solver_state, new_last_restart_info = run_restart_scheme(
+            scaled_problem.scaled_qp,
+            solver_state,
+            last_restart_info,
+            self._restart_params,
         )
 
-        new_solver_state = self.take_step(
+        new_solver_state = self.take_multiple_steps(
             restarted_solver_state, scaled_problem.scaled_qp
         )
         new_solver_state.termination_status = termination_status
@@ -559,8 +666,177 @@ class raPDHG(abc.ABC):
             qp_cache,
         )
 
+    def primal_feasibility_polishing(self, solver_state, scaled_problem, qp_cache):
+        """Perform primal feasibility polishing.
+
+        Parameters
+        ----------
+        solver_state : PdhgSolverState
+            The current state of the solver.
+        scaled_problem : ScaledQpProblem
+            The original problem and scaled problem data.
+        qp_cache : CachedQuadraticProgramInfo
+            The cached quadratic programming information.
+
+        Returns
+        -------
+        jnp.array
+            The primal solution.
+        bool
+            Whether primal feasibility succeeds.
+        """
+        (
+            primal_feasibility_problem,
+            primal_feasibility_solver_state,
+            last_restart_info,
+        ) = init_primal_feasibility_polishing(
+            scaled_problem, solver_state, self._initial_primal_weight
+        )
+        (new_solver_state, last_restart_info, should_terminate, _, _) = while_loop(
+            cond_fun=lambda state: state[2] == False,
+            body_fun=lambda state: self.primal_feasibility_polishing_iterate(*state),
+            init_val=(
+                primal_feasibility_solver_state,
+                last_restart_info,
+                False,
+                primal_feasibility_problem,
+                qp_cache,
+            ),
+            maxiter=self.iteration_limit,
+            unroll=self.unroll,
+            jit=self.jit,
+        )
+        return new_solver_state.avg_primal_solution, should_terminate
+
+    def primal_feasibility_polishing_iterate(
+        self,
+        primal_polishing_solver_state,
+        last_restart_info,
+        should_terminate,
+        primal_feasibility_problem,
+        qp_cache,
+    ):
+        zeroed_dual_solver_state = set_dual_solution_to_zero(
+            primal_polishing_solver_state
+        )
+        restarted_primal_polishing_solver_state, new_last_restart_info = (
+            run_restart_scheme_feasibility_polishing(
+                primal_feasibility_problem.scaled_qp,
+                primal_polishing_solver_state,
+                zeroed_dual_solver_state,
+                last_restart_info,
+                self._restart_params,
+            )
+        )
+
+        new_primal_polishing_solver_state = self.take_multiple_steps(
+            restarted_primal_polishing_solver_state,
+            primal_feasibility_problem.scaled_qp,
+        )
+        new_should_terminate = check_primal_feasibility(
+            primal_feasibility_problem,
+            new_primal_polishing_solver_state,
+            self._polishing_termination_criteria,
+            qp_cache,
+            1.0,
+            self.termination_evaluation_frequency * self.display_frequency,
+        )
+        return (
+            new_primal_polishing_solver_state,
+            new_last_restart_info,
+            new_should_terminate,
+            primal_feasibility_problem,
+            qp_cache,
+        )
+
+    def dual_feasibility_polishing(self, solver_state, scaled_problem, qp_cache):
+        """Perform dual feasibility polishing.
+
+        Parameters
+        ----------
+        solver_state : PdhgSolverState
+            The current state of the solver.
+        scaled_problem : ScaledQpProblem
+            The original problem and scaled problem data.
+        qp_cache : CachedQuadraticProgramInfo
+            The cached quadratic programming information.
+
+        Returns
+        -------
+        jnp.array
+            The dual solution.
+        bool
+            Whether dual feasibility succeeds.
+        """
+        dual_feasibility_problem, dual_feasibility_solver_state, last_restart_info = (
+            init_dual_feasibility_polishing(
+                scaled_problem, solver_state, self._initial_primal_weight
+            )
+        )
+
+        (new_solver_state, last_restart_info, should_terminate, _, _) = while_loop(
+            cond_fun=lambda state: state[2] == False,
+            body_fun=lambda state: self.dual_feasibility_polishing_iterate(*state),
+            init_val=(
+                dual_feasibility_solver_state,
+                last_restart_info,
+                False,
+                dual_feasibility_problem,
+                qp_cache,
+            ),
+            maxiter=self.iteration_limit,
+            unroll=self.unroll,
+            jit=self.jit,
+        )
+        return new_solver_state.avg_dual_solution, should_terminate
+
+    def dual_feasibility_polishing_iterate(
+        self,
+        dual_polishing_solver_state,
+        last_restart_info,
+        should_terminate,
+        dual_feasibility_problem,
+        qp_cache,
+    ):
+        zeroed_primal_solver_state = set_primal_solution_to_zero(
+            dual_polishing_solver_state
+        )
+        restarted_dual_polishing_solver_state, new_last_restart_info = (
+            run_restart_scheme_feasibility_polishing(
+                dual_feasibility_problem.scaled_qp,
+                zeroed_primal_solver_state,
+                dual_polishing_solver_state,
+                last_restart_info,
+                self._restart_params,
+            )
+        )
+
+        new_dual_polishing_solver_state = self.take_multiple_steps(
+            restarted_dual_polishing_solver_state, dual_feasibility_problem.scaled_qp
+        )
+
+        new_should_terminate = check_dual_feasibility(
+            dual_feasibility_problem,
+            new_dual_polishing_solver_state,
+            self._polishing_termination_criteria,
+            qp_cache,
+            1.0,
+            self.termination_evaluation_frequency * self.display_frequency,
+        )
+
+        return (
+            new_dual_polishing_solver_state,
+            new_last_restart_info,
+            new_should_terminate,
+            dual_feasibility_problem,
+            qp_cache,
+        )
+
     def optimize(
-        self, original_problem: QuadraticProgrammingProblem
+        self,
+        original_problem: QuadraticProgrammingProblem,
+        initial_primal_solution=None,
+        initial_dual_solution=None,
     ) -> SaddlePointOutput:
         """
         Main algorithm: given parameters and LP problem, return solutions.
@@ -569,6 +845,10 @@ class raPDHG(abc.ABC):
         ----------
         original_problem : QuadraticProgrammingProblem
             The quadratic programming problem to be solved.
+        initial_primal_solution : jnp.array, optional
+            The initial primal solution.
+        initial_dual_solution : jnp.array, optional
+            The initial dual solution.
 
         Returns
         -------
@@ -592,25 +872,75 @@ class raPDHG(abc.ABC):
         logger.info("Preconditioning Time (seconds): %.2e", precondition_time)
 
         solver_state, last_restart_info = self.initialize_solver_status(
-            scaled_problem.scaled_qp
+            scaled_problem, initial_primal_solution, initial_dual_solution
         )
 
         # Iteration loop
         display_iteration_stats_heading()
 
         iteration_start_time = timeit.default_timer()
+        # Initial iterations, where restart will be checked every iteration.
         (solver_state, last_restart_info, should_terminate, _, _) = while_loop(
             cond_fun=lambda state: state[2] == False,
-            body_fun=lambda state: self.iteration_update(*state),
+            body_fun=lambda state: self.initial_iteration_update(*state),
+            init_val=(solver_state, last_restart_info, False, scaled_problem, qp_cache),
+            maxiter=10,
+            unroll=self.unroll,
+            jit=self.jit,
+        )
+
+        (solver_state, last_restart_info, should_terminate, _, _) = while_loop(
+            cond_fun=lambda state: state[2] == False,
+            body_fun=lambda state: self.main_iteration_update(*state),
             init_val=(solver_state, last_restart_info, False, scaled_problem, qp_cache),
             maxiter=self.iteration_limit,
             unroll=self.unroll,
             jit=self.jit,
         )
         iteration_time = timeit.default_timer() - iteration_start_time
+
+        if self.feasibility_polishing:
+            feasibility_polishing_start_time = timeit.default_timer()
+            polished_primal_solution, primal_feasibility = (
+                self.primal_feasibility_polishing(
+                    solver_state, scaled_problem, qp_cache
+                )
+            )
+            polished_dual_solution, dual_feasibility = self.dual_feasibility_polishing(
+                solver_state, scaled_problem, qp_cache
+            )
+            feasibility_polishing_time = (
+                timeit.default_timer() - feasibility_polishing_start_time
+            )
+            (
+                solver_state.avg_primal_solution,
+                solver_state.avg_primal_product,
+                solver_state.avg_dual_solution,
+                solver_state.avg_dual_product,
+            ) = jax.lax.cond(
+                primal_feasibility & dual_feasibility,
+                lambda: (
+                    polished_primal_solution,
+                    scaled_problem.scaled_qp.constraint_matrix
+                    @ polished_primal_solution,
+                    polished_dual_solution,
+                    scaled_problem.scaled_qp.constraint_matrix_t
+                    @ polished_dual_solution,
+                ),
+                lambda: (
+                    solver_state.avg_primal_solution,
+                    solver_state.avg_primal_product,
+                    solver_state.avg_dual_solution,
+                    solver_state.avg_dual_product,
+                ),
+            )
+        else:
+            feasibility_polishing_time = 0
+
         timing = {
             "Preconditioning": precondition_time,
             "Iteration loop": iteration_time,
+            "Feasibility polishing": feasibility_polishing_time,
         }
 
         # Log the stats of the final iteration.
