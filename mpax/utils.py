@@ -134,10 +134,10 @@ class TwoSidedQpProblem:
     variable_upper_bound: List[float]
     constraint_lower_bound: List[float]
     constraint_upper_bound: List[float]
-    constraint_matrix: Union[BCSR, BCOO]
+    constraint_matrix: Union[BCSR, BCOO, jnp.ndarray]
     objective_constant: float
     objective_vector: List[float]
-    objective_matrix: Union[BCSR, BCOO]
+    objective_matrix: Union[BCSR, BCOO, jnp.ndarray]
 
 
 @chex.dataclass
@@ -178,11 +178,11 @@ class QuadraticProgrammingProblem:
     variable_upper_bound: jnp.ndarray
     isfinite_variable_lower_bound: jnp.ndarray
     isfinite_variable_upper_bound: jnp.ndarray
-    objective_matrix: Union[BCSR, BCOO]
+    objective_matrix: Union[BCSR, BCOO, jnp.ndarray]
     objective_vector: jnp.ndarray
     objective_constant: float
-    constraint_matrix: Union[BCSR, BCOO]
-    constraint_matrix_t: Union[BCSR, BCOO]
+    constraint_matrix: Union[BCSR, BCOO, jnp.ndarray]
+    constraint_matrix_t: Union[BCSR, BCOO, jnp.ndarray]
     right_hand_side: jnp.ndarray
     num_equalities: int
     equalities_mask: jnp.ndarray

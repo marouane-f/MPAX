@@ -3,7 +3,7 @@ from typing import NamedTuple, Tuple
 import jax
 import jax.numpy as jnp
 
-from mpax.solver_log import log_iteration_stats
+from mpax.solver_log import display_iteration_stats
 from mpax.utils import (
     CachedQuadraticProgramInfo,
     ConvergenceInformation,
@@ -473,7 +473,7 @@ def evaluate_unscaled_iteration_stats(
         primal_weight=solver_state.primal_weight,
         method_specific_stats={},
     )
-    log_iteration_stats(current_iteration_stats, solver_state, display_frequency)
+    display_iteration_stats(current_iteration_stats, solver_state)
     return current_iteration_stats
 
 

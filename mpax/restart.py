@@ -606,6 +606,55 @@ def run_restart_scheme(
     )
 
 
+def run_restart_scheme_feasibility_polishing(
+    problem: QuadraticProgrammingProblem,
+    current_solver_state: PdhgSolverState,
+    restart_solver_state: PdhgSolverState,
+    last_restart_info: RestartInfo,
+    restart_params: RestartParameters,
+):
+    """
+    Check restart criteria based on current and average KKT residuals.
+
+    Parameters
+    ----------
+    problem : QuadraticProgrammingProblem
+        The quadratic programming problem instance.
+    current_solver_state : PdhgSolverState
+        The current solver state, i.e. (x_k, y_k).
+    restart_solver_state : PdhgSolverState
+        The solver state to check restart criteria, i.e. (x_k, 0) or (0, y_k).
+    last_restart_info : CuRestartInfo
+        Information from the last restart.
+    restart_params : RestartParameters
+        Parameters for controlling restart behavior.
+
+    Returns
+    -------
+    tuple
+        The new solver state, and the new last restart info.
+    """
+
+    do_restart, reset_to_average, kkt_reduction_ratio = jax.lax.cond(
+        restart_solver_state.solutions_count == 0,
+        lambda: (False, False, last_restart_info.reduction_ratio_last_trial),
+        lambda: restart_criteria_met_kkt(
+            restart_params, problem, restart_solver_state, last_restart_info
+        ),
+    )
+    return jax.lax.cond(
+        do_restart,
+        lambda: perform_restart(
+            restart_solver_state,
+            reset_to_average,
+            last_restart_info,
+            kkt_reduction_ratio,
+            restart_params,
+        ),
+        lambda: (current_solver_state, last_restart_info),
+    )
+
+
 def compute_new_primal_weight(
     last_restart_info: RestartInfo,
     primal_weight: float,

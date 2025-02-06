@@ -4,7 +4,13 @@ from typing import List, Tuple, Union
 import jax.numpy as jnp
 from jax.experimental.sparse import BCOO, BCSR, bcoo_concatenate
 
-from mpax.solver_log import display_problem_details
+from mpax.solver_log import (
+    display_problem_details,
+    get_col_l_inf_norms,
+    get_row_l_inf_norms,
+    get_row_l2_norms,
+    get_col_l2_norms,
+)
 from mpax.utils import PresolveInfo, QuadraticProgrammingProblem, ScaledQpProblem
 
 logger = logging.getLogger(__name__)
@@ -108,60 +114,6 @@ def validate(p: QuadraticProgrammingProblem) -> bool:
     return True
 
 
-def l2_norm(matrix: BCSR, axis: int) -> jnp.ndarray:
-    """
-    Returns the l2 norm of each row or column of a matrix.
-
-    The method rescales the sum-of-squares computation by the largest
-    absolute value if nonzero in order to avoid overflow.
-
-    Parameters
-    ----------
-    matrix : BCSR
-        A sparse matrix in BCSR format.
-    axis : int
-        The axis to compute the norm over. Must be 0 or 1.
-
-    Returns
-    -------
-    jnp.ndarray
-        An array with the l2 norm of the matrix over the given dimension.
-    """
-    if axis not in (0, 1):
-        raise ValueError("axis must be 0 or 1")
-
-    # Check if the matrix is empty by examining the size of the data array
-    if matrix.data.size == 0:
-        raise ValueError("The input matrix is empty and cannot compute L2 norm.")
-
-    # Extract the row indices, column indices, and data from the BCOO matrix
-    row_indices, col_indices = matrix.indices.T
-    data = matrix.data
-
-    if axis == 0:
-        col_max = jnp.full(matrix.shape[1], -jnp.inf)
-        col_max = col_max.at[col_indices].max(data)
-        scale_factor = jnp.where(col_max == -jnp.inf, 1.0, col_max)
-        scaled_data = data / scale_factor[col_indices]  # Scale by column max
-
-        # Calculate column L2 norms
-        col_squares = jnp.bincount(
-            col_indices, weights=scaled_data**2, minlength=matrix.shape[1]
-        )
-        return col_max * jnp.sqrt(col_squares)
-    else:
-        row_max = jnp.full(matrix.shape[0], -jnp.inf)
-        row_max = row_max.at[row_indices].max(data)
-        scale_factor = jnp.where(row_max == -jnp.inf, 1.0, row_max)
-        scaled_data = data / scale_factor[row_indices]  # Scale by row max
-
-        # Calculate row L2 norms
-        row_squares = jnp.bincount(
-            row_indices, weights=scaled_data**2, minlength=matrix.shape[0]
-        )
-        return row_max * jnp.sqrt(row_squares)
-
-
 def remove_empty_rows(problem: QuadraticProgrammingProblem) -> List[int]:
     """
     Removes the empty rows of a quadratic programming problem.
@@ -176,13 +128,18 @@ def remove_empty_rows(problem: QuadraticProgrammingProblem) -> List[int]:
     List[int]
         List of indices of the removed empty columns.
     """
-
     num_rows = problem.constraint_matrix.shape[0]
-    seen_row = jnp.zeros(num_rows, dtype=bool)
-    row_indices, _ = problem.constraint_matrix.indices.T
 
-    for row in jnp.unique(row_indices):
-        seen_row = seen_row.at[row].set(True)
+    if isinstance(problem.constraint_matrix, BCOO):
+        seen_row = jnp.zeros(num_rows, dtype=bool)
+        row_indices, _ = problem.constraint_matrix.indices.T
+
+        for row in jnp.unique(row_indices):
+            seen_row = seen_row.at[row].set(True)
+    elif isinstance(problem.constraint_matrix, jnp.ndarray):
+        seen_row = ~jnp.all(problem.constraint_matrix == 0, axis=1)
+    else:
+        raise TypeError("constraint_matrix must be either BCOO or jnp.ndarray.")
 
     empty_rows = jnp.where(~seen_row)[0]
 
@@ -194,18 +151,21 @@ def remove_empty_rows(problem: QuadraticProgrammingProblem) -> List[int]:
 
     if len(empty_rows) > 0:
         # Filter to keep only non-empty rows
-        mask = jnp.isin(row_indices, jnp.where(seen_row)[0])
-        new_data = problem.constraint_matrix.data[mask]
-        new_indices = problem.constraint_matrix.indices[mask]
+        if isinstance(problem.constraint_matrix, BCOO):
+            mask = jnp.isin(row_indices, jnp.where(seen_row)[0])
+            new_data = problem.constraint_matrix.data[mask]
+            new_indices = problem.constraint_matrix.indices[mask]
 
-        # Create the filtered BCOO matrix
-        new_coo_matrix = BCOO(
-            (new_data, new_indices),
-            shape=(jnp.sum(seen_row), problem.constraint_matrix.shape[1]),
-        )
+            # Create the filtered BCOO matrix
+            new_coo_matrix = BCOO(
+                (new_data, new_indices),
+                shape=(jnp.sum(seen_row), problem.constraint_matrix.shape[1]),
+            )
 
-        # Assign back to the problem, using BCOO directly
-        problem.constraint_matrix = new_coo_matrix
+            # Assign back to the problem, using BCOO directly
+            problem.constraint_matrix = new_coo_matrix
+        elif isinstance(problem.constraint_matrix, jnp.ndarray):
+            problem.constraint_matrix = problem.constraint_matrix[seen_row, :]
         problem.right_hand_side = problem.right_hand_side[seen_row]
         num_empty_equalities = jnp.sum(empty_rows <= problem.num_equalities)
         problem.num_equalities -= num_empty_equalities
@@ -231,9 +191,18 @@ def remove_empty_columns(problem: QuadraticProgrammingProblem) -> List[int]:
     num_columns = problem.constraint_matrix.shape[1]
 
     # Determine empty columns by checking if each column index appears
-    col_indices = problem.constraint_matrix.indices[:, 1]  # Extract column indices
-    is_empty_column = jnp.ones(num_columns, dtype=bool).at[col_indices].set(False)
+    if isinstance(problem.constraint_matrix, BCOO):
+        col_indices = problem.constraint_matrix.indices[:, 1]  # Extract column indices
+        is_empty_column = jnp.ones(num_columns, dtype=bool).at[col_indices].set(False)
+    elif isinstance(problem.constraint_matrix, jnp.ndarray):
+        is_empty_column = jnp.all(problem.constraint_matrix == 0, axis=0)
+    else:
+        raise TypeError("constraint_matrix must be either BCOO or jnp.ndarray.")
+
     empty_columns = jnp.where(is_empty_column)[0]
+    # Filter non-empty columns and update problem matrices and vectors
+    non_empty_mask = ~is_empty_column
+    non_empty_columns = jnp.where(non_empty_mask)[0]
 
     # Update objective constant based on empty columns
     for col in empty_columns:
@@ -244,26 +213,26 @@ def remove_empty_columns(problem: QuadraticProgrammingProblem) -> List[int]:
             else problem.variable_upper_bound[col] * objective_coef
         )
 
-    # Filter non-empty columns and update problem matrices and vectors
-    non_empty_mask = ~is_empty_column
-    non_empty_columns = jnp.where(non_empty_mask)[0]
-
-    # Create a new BCOO matrix with non-empty columns only
-    col_mapping = {
-        old_idx: new_idx for new_idx, old_idx in enumerate(non_empty_columns.tolist())
-    }
-    mask = jnp.isin(col_indices, non_empty_columns)
-    filtered_data = problem.constraint_matrix.data[mask]
-    filtered_indices = jnp.array(
-        [
-            [row, col_mapping[int(col)]]
-            for row, col in problem.constraint_matrix.indices[mask]
-        ]
-    )
-    new_constraint_matrix = BCOO(
-        (filtered_data, filtered_indices),
-        shape=(problem.constraint_matrix.shape[0], len(non_empty_columns)),
-    )
+    if isinstance(problem.constraint_matrix, BCOO):
+        # Create a new BCOO matrix with non-empty columns only
+        col_mapping = {
+            old_idx: new_idx
+            for new_idx, old_idx in enumerate(non_empty_columns.tolist())
+        }
+        mask = jnp.isin(col_indices, non_empty_columns)
+        filtered_data = problem.constraint_matrix.data[mask]
+        filtered_indices = jnp.array(
+            [
+                [row, col_mapping[int(col)]]
+                for row, col in problem.constraint_matrix.indices[mask]
+            ]
+        )
+        new_constraint_matrix = BCOO(
+            (filtered_data, filtered_indices),
+            shape=(problem.constraint_matrix.shape[0], len(non_empty_columns)),
+        )
+    else:
+        new_constraint_matrix = problem.constraint_matrix[:, non_empty_mask]
 
     # Update problem attributes
     problem.constraint_matrix = new_constraint_matrix
@@ -438,12 +407,24 @@ def scale_problem(
     problem.objective_vector /= variable_rescaling
 
     # Scale the objective matrix using BCSR format directly
-    scaled_data = (
-        problem.objective_matrix.data
-        * (1.0 / variable_rescaling)[problem.objective_matrix.indices[:, 1]]
-        * (1.0 / variable_rescaling)[problem.objective_matrix.indices[:, 0]]
-    )
-    problem.objective_matrix.data = scaled_data
+    if isinstance(problem.objective_matrix, jnp.ndarray):
+        # Scale the matrix along the rows
+        # variable_rescaling[:, None] reshapes variable_rescaling from (n,) to (n, 1),
+        # enabling broadcasting along the rows. Each element in row i is divided by variable_rescaling[i].
+        problem.objective_matrix = (
+            problem.objective_matrix / variable_rescaling[:, None]
+        )
+        # Scale the matrix along the columns
+        # variable_rescaling (with shape (n,)) is broadcasted along the columns,
+        # so each element in column j is divided by variable_rescaling[j].
+        problem.objective_matrix = problem.objective_matrix / variable_rescaling
+    elif isinstance(problem.objective_matrix, BCOO):
+        scaled_data = (
+            problem.objective_matrix.data
+            * (1.0 / variable_rescaling)[problem.objective_matrix.indices[:, 0]]
+            * (1.0 / variable_rescaling)[problem.objective_matrix.indices[:, 1]]
+        )
+        problem.objective_matrix.data = scaled_data
 
     # Scale variable bounds
     problem.variable_upper_bound *= variable_rescaling
@@ -453,12 +434,18 @@ def scale_problem(
     problem.right_hand_side /= constraint_rescaling
 
     # Scale the constraint matrix
-    scaled_data = (
-        problem.constraint_matrix.data
-        * (1.0 / constraint_rescaling)[problem.constraint_matrix.indices[:, 0]]
-        * (1.0 / variable_rescaling)[problem.constraint_matrix.indices[:, 1]]
-    )
-    problem.constraint_matrix.data = scaled_data
+    if isinstance(problem.constraint_matrix, jnp.ndarray):
+        problem.constraint_matrix = (
+            problem.constraint_matrix / constraint_rescaling[:, None]
+        )
+        problem.constraint_matrix = problem.constraint_matrix / variable_rescaling
+    elif isinstance(problem.constraint_matrix, BCOO):
+        scaled_data = (
+            problem.constraint_matrix.data
+            * (1.0 / constraint_rescaling)[problem.constraint_matrix.indices[:, 0]]
+            * (1.0 / variable_rescaling)[problem.constraint_matrix.indices[:, 1]]
+        )
+        problem.constraint_matrix.data = scaled_data
     problem.constraint_matrix_t = problem.constraint_matrix.T
 
 
@@ -499,8 +486,8 @@ def l2_norm_rescaling(
         A tuple of vectors containing the row and column rescaling factors.
     """
     # Calculate L2 norms of rows and columns
-    norm_of_rows = l2_norm(problem.constraint_matrix, axis=1)
-    norm_of_columns = l2_norm(problem.constraint_matrix, axis=0)
+    norm_of_rows = get_row_l2_norms(problem.constraint_matrix)
+    norm_of_columns = get_col_l2_norms(problem.constraint_matrix)
 
     # Avoid division by zero by setting norms to 1 where they are 0
     norm_of_rows = jnp.where(norm_of_rows == 0, 1.0, norm_of_rows)
@@ -546,7 +533,7 @@ def rescale_problem(
         original_problem.constraint_matrix = (
             original_problem.constraint_matrix.to_bcoo()
         )
-    elif isinstance(original_problem.constraint_matrix, BCOO):
+    elif isinstance(original_problem.constraint_matrix, (BCOO, jnp.ndarray)):
         pass
     else:
         raise ValueError("Unsupported matrix format.")
@@ -555,7 +542,7 @@ def rescale_problem(
         original_problem.constraint_matrix_t = (
             original_problem.constraint_matrix_t.to_bcoo()
         )
-    elif isinstance(original_problem.constraint_matrix_t, BCOO):
+    elif isinstance(original_problem.constraint_matrix_t, (BCOO, jnp.ndarray)):
         pass
     else:
         raise ValueError("Unsupported matrix format.")
@@ -655,26 +642,20 @@ def ruiz_rescaling(
 
         # Determine variable rescaling
         if p == float("inf"):
-            row_indices, col_indices = constraint_matrix.indices.T
-            data = constraint_matrix.data
-            constraint_col_max = jnp.zeros(constraint_matrix.shape[1])
-            constraint_col_max = constraint_col_max.at[col_indices].max(jnp.abs(data))
-
-            row_indices, col_indices = objective_matrix.indices.T
-            data = objective_matrix.data
-            objective_col_max = jnp.zeros(objective_matrix.shape[1])
-            objective_col_max = objective_col_max.at[col_indices].max(jnp.abs(data))
+            constraint_col_max = get_col_l_inf_norms(constraint_matrix)
+            objective_col_max = get_col_l_inf_norms(objective_matrix)
             variable_rescaling = jnp.sqrt(
                 jnp.maximum(constraint_col_max, objective_col_max)
             )
-        else:
-            assert p == 2
+        elif p == 2:
             variable_rescaling = jnp.sqrt(
                 jnp.sqrt(
-                    jnp.square(l2_norm(constraint_matrix, axis=0))
-                    + jnp.square(l2_norm(objective_matrix, axis=0))
+                    jnp.square(get_col_l2_norms(constraint_matrix))
+                    + jnp.square(get_col_l2_norms(objective_matrix))
                 )
             )
+        else:
+            raise ValueError("Norm must be 2 or Inf.")
 
         # Avoid division by zero by setting zero values to 1.0
         variable_rescaling = jnp.where(
@@ -686,16 +667,10 @@ def ruiz_rescaling(
             constraint_rescaling = jnp.array([])
         else:
             if p == float("inf"):
-                row_indices, col_indices = constraint_matrix.indices.T
-                data = constraint_matrix.data
-                constraint_row_max = jnp.full(constraint_matrix.shape[0], -jnp.inf)
-                constraint_row_max = constraint_row_max.at[row_indices].max(
-                    jnp.abs(data)
-                )
+                constraint_row_max = get_row_l_inf_norms(constraint_matrix)
                 constraint_rescaling = jnp.sqrt(constraint_row_max)
-            else:
-                assert p == 2
-                norm_of_rows = l2_norm(problem.constraint_matrix, axis=1)
+            elif p == 2:
+                norm_of_rows = get_row_l2_norms(problem.constraint_matrix)
 
                 # Determine the target row norm
                 target_row_norm = jnp.sqrt(num_variables / num_constraints)
@@ -709,6 +684,8 @@ def ruiz_rescaling(
                     )
 
                 constraint_rescaling = jnp.sqrt(norm_of_rows / target_row_norm)
+            else:
+                raise ValueError("Norm must be 2 or inf.")
 
             # Avoid division by zero
             constraint_rescaling = jnp.where(
@@ -748,12 +725,9 @@ def presolve(
     saved_variable_upper_bound = jnp.copy(qp.variable_upper_bound)
 
     original_dual_size, original_primal_size = qp.constraint_matrix.shape
-    empty_rows = remove_empty_rows(qp)
 
-    if jnp.allclose(qp.objective_matrix.data, 0):
-        empty_columns = remove_empty_columns(qp)
-    else:
-        empty_columns = jnp.array([])
+    empty_rows = remove_empty_rows(qp)
+    empty_columns = remove_empty_columns(qp)
 
     check_for_singleton_constraints(qp)
 
@@ -827,21 +801,29 @@ def pock_chambolle_rescaling(
     assert 0 <= alpha <= 2
 
     constraint_matrix = qp.constraint_matrix
-    row_indices, col_indices = constraint_matrix.indices.T
-    variable_rescaling = jnp.sqrt(
-        jnp.bincount(
-            col_indices,
-            weights=jnp.abs(constraint_matrix.data) ** (2 - alpha),
-            length=constraint_matrix.shape[1],
+    if isinstance(qp.constraint_matrix, jnp.ndarray):
+        variable_rescaling = jnp.sqrt(
+            jnp.sum(jnp.abs(constraint_matrix) ** (2 - alpha), axis=0)
         )
-    )
-    constraint_rescaling = jnp.sqrt(
-        jnp.bincount(
-            row_indices,
-            weights=jnp.abs(constraint_matrix.data) ** (alpha),
-            length=constraint_matrix.shape[0],
+        constraint_rescaling = jnp.sqrt(
+            jnp.sum(jnp.abs(constraint_matrix) ** (2 - alpha), axis=1)
         )
-    )
+    elif isinstance(qp.constraint_matrix, BCOO):
+        row_indices, col_indices = constraint_matrix.indices.T
+        variable_rescaling = jnp.sqrt(
+            jnp.bincount(
+                col_indices,
+                weights=jnp.abs(constraint_matrix.data) ** (2 - alpha),
+                length=constraint_matrix.shape[1],
+            )
+        )
+        constraint_rescaling = jnp.sqrt(
+            jnp.bincount(
+                row_indices,
+                weights=jnp.abs(constraint_matrix.data) ** (alpha),
+                length=constraint_matrix.shape[0],
+            )
+        )
 
     variable_rescaling = jnp.where(variable_rescaling == 0, 1.0, variable_rescaling)
     constraint_rescaling = jnp.where(

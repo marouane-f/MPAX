@@ -11,6 +11,8 @@ from mpax.utils import (
     QuadraticProgrammingProblem,
     TerminationCriteria,
     TerminationStatus,
+    PdhgSolverState,
+    ScaledQpProblem,
 )
 
 
@@ -285,3 +287,119 @@ def check_termination_criteria(
     #     operand=None,
     # )
     return should_terminate, termination_status
+
+
+def check_primal_feasibility(
+    scaled_problem: ScaledQpProblem,
+    solver_state: PdhgSolverState,
+    criteria: TerminationCriteria,
+    qp_cache: CachedQuadraticProgramInfo,
+    elapsed_time: float,
+    display_frequency: int,
+    average: bool = True,
+) -> bool:
+    """
+    Checks if the given iteration_stats satisfy the termination criteria.
+
+    Parameters
+    ----------
+    scaled_problem : ScaledQpProblem
+        The scaled quadratic programming problem.
+    solver_state : PdhgSolverState
+        The current state of the solver.
+    criteria : TerminationCriteria
+        Termination criteria to check against.
+    qp_cache : CachedQuadraticProgramInfo
+        Cached information about the quadratic program.
+    elapsed_time : float
+        Elapsed time since the start of the algorithm.
+    display_frequency : int
+        Frequency of display.
+    average : bool, optional
+        Whether is raPDHG, by default True.
+
+    Returns
+    -------
+    bool
+        True if primal feasibility criteria are met, False otherwise.
+    """
+    eps_ratio = criteria.eps_abs / criteria.eps_rel
+    current_iteration_stats = evaluate_unscaled_iteration_stats(
+        scaled_problem,
+        qp_cache,
+        solver_state,
+        elapsed_time,
+        eps_ratio,
+        display_frequency,
+        average,
+    )
+    ci = current_iteration_stats.convergence_information
+    primal_err = jax.lax.cond(
+        criteria.optimality_norm == OptimalityNorm.L_INF,
+        lambda: ci.l_inf_primal_residual,
+        lambda: ci.l2_primal_residual,
+    )
+    primal_err_baseline = jax.lax.cond(
+        criteria.optimality_norm == OptimalityNorm.L_INF,
+        lambda: qp_cache.l_inf_norm_primal_right_hand_side,
+        lambda: qp_cache.l2_norm_primal_right_hand_side,
+    )
+    return primal_err < criteria.eps_abs + criteria.eps_rel * primal_err_baseline
+
+
+def check_dual_feasibility(
+    scaled_problem: ScaledQpProblem,
+    solver_state: PdhgSolverState,
+    criteria: TerminationCriteria,
+    qp_cache: CachedQuadraticProgramInfo,
+    elapsed_time: float,
+    display_frequency: int,
+    average: bool = True,
+) -> Union[str, bool]:
+    """
+    Checks if the given iteration_stats satisfy the termination criteria.
+
+    Parameters
+    ----------
+    scaled_problem : ScaledQpProblem
+        The scaled quadratic programming problem.
+    solver_state : PdhgSolverState
+        The current state of the solver.
+    criteria : TerminationCriteria
+        Termination criteria to check against.
+    qp_cache : CachedQuadraticProgramInfo
+        Cached information about the quadratic program.
+    elapsed_time : float
+        Elapsed time since the start of the algorithm.
+    display_frequency : int
+        Frequency of display.
+    average : bool, optional
+        Whether is raPDHG, by default True.
+
+    Returns
+    -------
+    bool
+        True if dual feasibility criteria are met, False otherwise.
+    """
+    eps_ratio = criteria.eps_abs / criteria.eps_rel
+    current_iteration_stats = evaluate_unscaled_iteration_stats(
+        scaled_problem,
+        qp_cache,
+        solver_state,
+        elapsed_time,
+        eps_ratio,
+        display_frequency,
+        average,
+    )
+    ci = current_iteration_stats.convergence_information
+    dual_err = jax.lax.cond(
+        criteria.optimality_norm == OptimalityNorm.L_INF,
+        lambda: ci.l_inf_dual_residual,
+        lambda: ci.l2_dual_residual,
+    )
+    dual_err_baseline = jax.lax.cond(
+        criteria.optimality_norm == OptimalityNorm.L_INF,
+        lambda: qp_cache.l_inf_norm_primal_linear_objective,
+        lambda: qp_cache.l2_norm_primal_linear_objective,
+    )
+    return dual_err < criteria.eps_abs + criteria.eps_rel * dual_err_baseline

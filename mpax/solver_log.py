@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 
 from jax import debug, lax
 from jax import numpy as jnp
@@ -56,112 +57,121 @@ def jax_debug_log(
     )
 
 
-def get_row_l2_norms(matrix: BCOO) -> jnp.ndarray:
+def get_row_l2_norms(matrix: Union[BCOO, BCSR, jnp.ndarray]) -> jnp.ndarray:
     """
     Compute the L2 norms of the rows of a sparse BCOO matrix.
 
     Parameters
     ----------
-    matrix : BCOO
-        Sparse matrix in BCOO format.
+    matrix : Union[BCOO, BCSR, jnp.ndarray]
+        Sparse matrix in BCOO, BCSR, jnp.ndarray format.
 
     Returns
     -------
     jnp.ndarray
         The L2 norms of the rows of the matrix.
     """
-    row_norm_squared = jnp.zeros(matrix.shape[0])
-    nzval = matrix.data
-    if isinstance(matrix, BCSR):
-        rowval = matrix.to_bcoo().indices[:, 0]
-    elif isinstance(matrix, BCOO):
-        rowval = matrix.indices[:, 0]
-
-    # Accumulate the sum of squares for each row
-    row_norm_squared = row_norm_squared.at[rowval].add(nzval**2)
+    if isinstance(matrix, (BCOO, BCSR)):
+        row_norms = jnp.zeros(matrix.shape[0])
+        nzval = matrix.data
+        if isinstance(matrix, BCSR):
+            rowval = matrix.to_bcoo().indices[:, 0]
+        elif isinstance(matrix, BCOO):
+            rowval = matrix.indices[:, 0]
+        # Accumulate the sum of squares for each row
+        row_norms = jnp.sqrt(row_norms.at[rowval].add(nzval**2))
+    elif isinstance(matrix, jnp.ndarray):
+        row_norms = jnp.linalg.norm(matrix, ord=2, axis=1)
 
     # Return the square root to get the L2 norms
-    return jnp.sqrt(row_norm_squared)
+    return row_norms
 
 
-def get_col_l2_norms(matrix: BCOO) -> jnp.ndarray:
+def get_col_l2_norms(matrix: Union[BCOO, BCSR, jnp.ndarray]) -> jnp.ndarray:
     """
     Compute the L2 norms of the columns of a sparse BCOO matrix.
 
     Parameters
     ----------
-    matrix : BCOO
-        Sparse matrix in BCOO format.
+    matrix : Union[BCOO, BCSR, jnp.ndarray]
+        Sparse matrix in BCOO, BCSR, jnp.ndarray format.
 
     Returns
     -------
     jnp.ndarray
         The L2 norms of the columns of the matrix.
     """
-    col_norms = jnp.zeros(matrix.shape[1])
-    nzval = matrix.data
-    if isinstance(matrix, BCSR):
-        colval = matrix.to_bcoo().indices[:, 1]
-    elif isinstance(matrix, BCOO):
-        colval = matrix.indices[:, 1]
+    if isinstance(matrix, (BCOO, BCSR)):
+        col_norms = jnp.zeros(matrix.shape[1])
+        nzval = matrix.data
+        if isinstance(matrix, BCSR):
+            colval = matrix.to_bcoo().indices[:, 1]
+        elif isinstance(matrix, BCOO):
+            colval = matrix.indices[:, 1]
 
-    # Accumulate the sum of squares for each column
-    col_norms = col_norms.at[colval].add(nzval**2)
+        # Accumulate the sum of squares for each column
+        col_norms = jnp.sqrt(col_norms.at[colval].add(nzval**2))
+    elif isinstance(matrix, jnp.ndarray):
+        col_norms = jnp.linalg.norm(matrix, ord=2, axis=0)
 
     # Return the square root to get the L2 norms
-    return jnp.sqrt(col_norms)
+    return col_norms
 
 
-def get_row_l_inf_norms(matrix: BCOO) -> jnp.ndarray:
+def get_row_l_inf_norms(matrix: Union[BCOO, BCSR, jnp.ndarray]) -> jnp.ndarray:
     """
     Compute the infinity norms (L-infinity) of the rows of a sparse BCOO matrix.
 
     Parameters
     ----------
-    matrix : BCOO
-        Sparse matrix in BCOO format.
+    matrix : Union[BCOO, BCSR, jnp.ndarray]
+        Sparse matrix in BCOO, BCSR, jnp.ndarray format.
 
     Returns
     -------
     jnp.ndarray
         The L-infinity norms of the rows of the matrix.
     """
-    row_norm = jnp.zeros(matrix.shape[0])
-    nzval = matrix.data
-    if isinstance(matrix, BCSR):
-        rowval = matrix.to_bcoo().indices[:, 0]
-    elif isinstance(matrix, BCOO):
-        rowval = matrix.indices[:, 0]
+    if isinstance(matrix, (BCOO, BCSR)):
+        row_norms = jnp.zeros(matrix.shape[0])
+        nzval = matrix.data
+        if isinstance(matrix, BCSR):
+            rowval = matrix.to_bcoo().indices[:, 0]
+        elif isinstance(matrix, BCOO):
+            rowval = matrix.indices[:, 0]
+        # Accumulate the max absolute value for each row
+        row_norms = row_norms.at[rowval].max(jnp.abs(nzval))
+    elif isinstance(matrix, jnp.ndarray):
+        row_norms = jnp.linalg.norm(matrix, ord=jnp.inf, axis=1)
 
-    # Accumulate the max absolute value for each row
-    row_norm = row_norm.at[rowval].max(jnp.abs(nzval))
-
-    return row_norm
+    return row_norms
 
 
-def get_col_l_inf_norms(matrix: BCOO) -> jnp.ndarray:
+def get_col_l_inf_norms(matrix: Union[BCOO, BCSR, jnp.ndarray]) -> jnp.ndarray:
     """
     Compute the infinity norms (L-infinity) of the columns of a sparse BCOO matrix.
 
     Parameters
     ----------
-    matrix : BCOO
-        Sparse matrix in BCOO format.
+    matrix : Union[BCOO, BCSR, jnp.ndarray]
+        Sparse matrix in BCOO, BCSR, jnp.ndarray format.
 
     Returns
     -------
     jnp.ndarray
         The L-infinity norms of the columns of the matrix.
     """
-    col_norms = jnp.zeros(matrix.shape[1])
-    nzval = matrix.data
-    if isinstance(matrix, BCSR):
-        colval = matrix.to_bcoo().indices[:, 1]
-    elif isinstance(matrix, BCOO):
-        colval = matrix.indices[:, 1]
-
-    # Accumulate the max absolute value for each column
-    col_norms = col_norms.at[colval].max(jnp.abs(nzval))
+    if isinstance(matrix, (BCOO, BCSR)):
+        col_norms = jnp.zeros(matrix.shape[1])
+        nzval = matrix.data
+        if isinstance(matrix, BCSR):
+            colval = matrix.to_bcoo().indices[:, 1]
+        else:
+            colval = matrix.indices[:, 1]
+        # Accumulate the max absolute value for each column
+        col_norms = col_norms.at[colval].max(jnp.abs(nzval))
+    elif isinstance(matrix, jnp.ndarray):
+        col_norms = jnp.linalg.norm(matrix, ord=jnp.inf, axis=0)
 
     return col_norms
 
@@ -320,26 +330,6 @@ def display_iteration_stats_heading():
             logger=logger,
             level=logging.DEBUG,
         )
-
-
-def log_iteration_stats(stats, solver_state, display_frequency):
-    """Log the iteration statistics.
-
-    Parameters
-    ----------
-    stats : IterationStats
-        The iteration statistics to be displayed.
-    solver_state : PdhgSolverState
-        The current state of the solver.
-    params : PdhgParameters
-        The parameters of the solver.
-    """
-    should_log = (solver_state.num_iterations % display_frequency == 0) | (
-        solver_state.num_iterations <= 10
-    )
-    lax.cond(
-        should_log, lambda: display_iteration_stats(stats, solver_state), lambda: None
-    )
 
 
 def display_iteration_stats(stats, solver_state):
