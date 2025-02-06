@@ -318,7 +318,7 @@ class raPDHG(abc.ABC):
     adaptive_step_size_limit_coef: float = 1.0
     warm_start: bool = False
     feasibility_polishing: bool = False
-    polishing_eps: float = 1e-06
+    eps_feas_polish: float = 1e-06
 
     def check_config(self):
         self._termination_criteria = TerminationCriteria(
@@ -341,8 +341,8 @@ class raPDHG(abc.ABC):
         )
         self._polishing_termination_criteria = TerminationCriteria(
             optimality_norm=self.optimality_norm,
-            eps_abs=self.polishing_eps,
-            eps_rel=self.polishing_eps,
+            eps_abs=self.eps_feas_polish,
+            eps_rel=self.eps_feas_polish,
             eps_primal_infeasible=self.eps_primal_infeasible,
             eps_dual_infeasible=self.eps_dual_infeasible,
             iteration_limit=self.iteration_limit,

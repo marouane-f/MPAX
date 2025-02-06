@@ -82,7 +82,7 @@ class r2HPDHG(raPDHG):
     adaptive_step_size_limit_coef: float = 0.2
     warm_start: bool = False
     feasibility_polishing: bool = False
-    polishing_eps: float = 1e-06
+    eps_feas_polish: float = 1e-06
 
     def take_step(
         self, solver_state: PdhgSolverState, problem: QuadraticProgrammingProblem
