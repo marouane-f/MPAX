@@ -42,13 +42,18 @@ MPAX implements two state-of-the-art first-order methods for solving LP problems
 * $\boldsymbol{\mathrm{r^2}}$**HPDHG**: [reflected restarted Halpern Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2407.16144).
 
 ### Solving a Single LP Problem
-
+MPAX supports both dense and sparse formats for the constraint matrix, controlled by the `use_sparse_matrix` parameter.
 ```python
 from mpax import create_lp, r2HPDHG
 
-lp = create_lp(c, A, b, G, h, l, u)
+# Create LP using sparse matrix format (default)
+lp = create_lp(c, A, b, G, h, l, u) # use_sparse_matrix=True by default
+
+# Create LP using dense matrix format
+lp = create_lp(c, A, b, G, h, l, u, use_sparse_matrix=False)
+
 solver = r2HPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
-result = solver.optimize(lp)
+result = solver.optimize(lp) # jittable
 ```
 
 ### Batch solving
@@ -125,7 +130,9 @@ pso_fun.defvjp(spo_fwd, spo_bwd)
 | `debug`                      | bool   | `False`   | Activates additional debugging information.                            |
 | `display_frequency`          | int    | `10`      | Frequency (in every termination check) for displaying solver statistics.            |
 | `jit`                        | bool   | `True`    | Enables JIT (Just-In-Time) compilation for faster execution.            |
-| `unroll`                     | bool   | `False`   | Unrolls iteration loops.  |
+| `unroll`                     | bool   | `False`   | Unrolls iteration loops  |
+| `warm_start`                 | bool   | `False`   | Whether to perform warm starting  |
+| `feasibility_polishing`      | bool   | `False`   | Whether to perform feasibility polishing  |
 
 **Termination**
 | Parameter                        | Type   | Default     | Description                                                           |
@@ -133,8 +140,9 @@ pso_fun.defvjp(spo_fwd, spo_bwd)
 | `eps_abs`                       | float  | `1e-4`      | Absolute tolerance for convergence.                                   |
 | `eps_rel`                       | float  | `1e-4`      | Relative tolerance for convergence.                                   |
 | `eps_primal_infeasible`         | float  | `1e-8`      | Tolerance for detecting primal infeasibility.                         |
-| `eps_dual_infeasible`           | float  | `1e-8`      | Tolerance for detecting dual infeasibility.                           |
-| `iteration_limit`               | int    | `max_int`   | Maximum number of iterations allowed (interpreted as unlimited by default). |
+| `eps_dual_infeasible`           | float  | `1e-8`      | Tolerance for detecting dual infeasibility                           |
+| `eps_feas_polish`               | float  | `1e-6`      | Tolerance for feasibility polishing |
+| `iteration_limit`               | int    | `max_int`   | Maximum number of iterations allowed (interpreted as unlimited by default) |
 
 **Precision**
 
