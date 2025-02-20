@@ -311,6 +311,7 @@ def compute_infeasibility_information(
     dual_residual: jnp.ndarray,
     primal_ray_estimate_product: jnp.ndarray,
     dual_ray_estimate_product: jnp.ndarray,
+    primal_ray_estimate_obj_product: jnp.ndarray,
 ):
     """
     Compute infeasibility information of the given primal and dual solutions.
@@ -383,7 +384,9 @@ def compute_infeasibility_information(
         problem.variable_upper_bound,
         reduced_costs,
         problem.right_hand_side,
+        primal_ray_estimate,
         dual_ray_estimate,
+        primal_ray_estimate_obj_product,
         problem.objective_constant,
     )
 
@@ -499,6 +502,7 @@ def evaluate_unscaled_iteration_stats(
             unscaled_dual_residual,
             unscaled_primal_product,
             unscaled_dual_product,
+            unscaled_primal_obj_product,
         )
     else:
         infeasibility_information = InfeasibilityInformation(
