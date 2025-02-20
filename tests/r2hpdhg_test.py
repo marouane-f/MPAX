@@ -122,8 +122,8 @@ def test_r2hpdhg_with_vmap():
 )
 def test_r2hpdhg_with_sharding():
     """Test the r2HPDHG solver on a batch of LP problems."""
-    mesh = jax.make_mesh((2,), ('x',))
-    sharding = jax.sharding.NamedSharding(mesh, P('x'))
+    mesh = jax.make_mesh((2,), ("x",))
+    sharding = jax.sharding.NamedSharding(mesh, P("x"))
 
     gurobi_model = gp.read(pytest_cache_dir + "/flugpl.mps")
     lp_sharded = create_lp_from_gurobi(gurobi_model, sharding=sharding)

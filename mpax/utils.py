@@ -170,6 +170,12 @@ class QuadraticProgrammingProblem:
         The vector of right-hand side values in the linear constraints.
     num_equalities : int
         The number of equalities in the problem.
+    equalities_mask : jnp.ndarray
+        A boolean mask indicating which constraints are equalities.
+    inequalities_mask : jnp.ndarray
+        A boolean mask indicating which constraints are inequalities.
+    is_lp : bool
+        Indicates whether the problem is a linear program (True) or a quadratic program (False).
     """
 
     num_variables: int
@@ -187,6 +193,7 @@ class QuadraticProgrammingProblem:
     num_equalities: int
     equalities_mask: jnp.ndarray
     inequalities_mask: jnp.ndarray
+    is_lp: bool
 
 
 class PresolveInfo(NamedTuple):
@@ -276,6 +283,7 @@ class RestartInfo:
     primal_diff_product: Optional[jnp.ndarray] = None  # used in r2HPDHG
     primal_product: Optional[jnp.ndarray] = None  # used in raPDHG
     dual_product: Optional[jnp.ndarray] = None  # used in raPDHG
+    primal_obj_product: Optional[jnp.ndarray] = None
     last_restart_length: int = 1
     primal_distance_moved_last_restart_period: float = 0.0
     dual_distance_moved_last_restart_period: float = 0.0
@@ -588,6 +596,7 @@ class PdhgSolverState:
     current_dual_solution: jnp.ndarray
     current_primal_product: jnp.ndarray
     current_dual_product: jnp.ndarray
+    current_primal_obj_product: jnp.ndarray
     solutions_count: int
     step_size: float
     primal_weight: float
@@ -602,6 +611,7 @@ class PdhgSolverState:
     avg_dual_solution: Optional[jnp.ndarray] = None
     avg_primal_product: Optional[jnp.ndarray] = None
     avg_dual_product: Optional[jnp.ndarray] = None
+    avg_primal_obj_product: Optional[jnp.ndarray] = None
     # Initial solutions and delta information are used in r2HPDHG
     initial_primal_solution: Optional[jnp.ndarray] = None
     initial_dual_solution: Optional[jnp.ndarray] = None

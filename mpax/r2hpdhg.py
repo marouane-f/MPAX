@@ -281,7 +281,7 @@ class r2HPDHG(raPDHG):
             The quadratic programming problem instance.
         solver_state : PdhgSolverState
             The current solver state.
-        last_restart_info : CuRestartInfo
+        last_restart_info : RestartInfo
             Information from the last restart.
 
         Returns
@@ -320,7 +320,7 @@ class r2HPDHG(raPDHG):
             The quadratic programming problem instance.
         solver_state : PdhgSolverState
             The current solver state.
-        last_restart_info : CuRestartInfo
+        last_restart_info : RestartInfo
             Information from the last restart.
 
         Returns
@@ -404,7 +404,6 @@ class r2HPDHG(raPDHG):
             qp_cache,
             solver_state.numerical_error,
             1.0,
-            self.termination_evaluation_frequency * self.display_frequency,
             False,
         )
 

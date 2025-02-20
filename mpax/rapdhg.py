@@ -39,7 +39,6 @@ from mpax.utils import (
     TerminationStatus,
     ScaledQpProblem,
 )
-from mpax.iteration_stats_utils import evaluate_unscaled_iteration_stats
 from mpax.feasibility_polishing import (
     init_primal_feasibility_polishing,
     set_dual_solution_to_zero,
@@ -78,7 +77,10 @@ def estimate_maximum_singular_value(
     epsilon = 1.0 - (1.0 - desired_relative_error) ** 2
     key = jax.random.PRNGKey(seed)
     x = jax.random.normal(key, (matrix.shape[1],))
-    matrix_transpose = BCSR.from_bcoo(matrix.to_bcoo().T)
+    if isinstance(matrix, BCSR):
+        matrix_transpose = BCSR.from_bcoo(matrix.to_bcoo().T)
+    elif isinstance(matrix, BCOO):
+        matrix_transpose = BCSR.from_bcoo(matrix.T)
     number_of_power_iterations = 0
 
     def cond_fun(state):
@@ -112,7 +114,7 @@ def estimate_maximum_singular_value(
         body_fun=body_fun,
         init_val=(x, 0),
         maxiter=1000,
-        unroll=True,
+        unroll=False,
         jit=True,
     )
     return (
@@ -148,9 +150,16 @@ def compute_next_solution(
         The delta primal, delta primal product, and delta dual.
     """
     # Compute the next primal solution.
+    # For LPs, momentum is not activated since both avg_primal_obj_product and current_primal_obj_product are zero vectors.
+    momentum_coef = 1 / (1.0 + solver_state.solutions_count / 2.0)
     next_primal_solution = solver_state.current_primal_solution - (
         step_size / solver_state.primal_weight
-    ) * (problem.objective_vector - solver_state.current_dual_product)
+    ) * (
+        problem.objective_vector
+        - solver_state.current_dual_product
+        + (1 - momentum_coef) * solver_state.avg_primal_obj_product
+        + momentum_coef * solver_state.current_primal_obj_product
+    )
     # Projection.
     next_primal_solution = jnp.minimum(
         problem.variable_upper_bound,
@@ -165,7 +174,7 @@ def compute_next_solution(
     ) * (
         problem.right_hand_side
         - (1 + extrapolation_coefficient) * delta_primal_product
-        - extrapolation_coefficient * solver_state.current_primal_product
+        - solver_state.current_primal_product
     )
     next_dual_solution = jnp.where(
         problem.inequalities_mask,
@@ -319,6 +328,7 @@ class raPDHG(abc.ABC):
     warm_start: bool = False
     feasibility_polishing: bool = False
     eps_feas_polish: float = 1e-06
+    infeasibility_detection: bool = False
 
     def check_config(self):
         self._termination_criteria = TerminationCriteria(
@@ -348,6 +358,40 @@ class raPDHG(abc.ABC):
             iteration_limit=self.iteration_limit,
         )
 
+    def calculate_constant_step_size(
+        self, primal_weight, iteration, last_step_size
+    ) -> float:
+        """Calculate the constant step size for the raPDHG algorithm.
+
+        Parameters
+        ----------
+        primal_weight : float
+            The primal weight.
+        iteration : int
+            The inner iteration counter, which will be set to zero if restart.
+        last_step_size : float
+            Step size in the last iteration.
+
+        Returns
+        -------
+        float
+            The constant step size.
+        """
+        next_step_size = (
+            0.99
+            * (2 + iteration)
+            / (
+                self._norm_Q / primal_weight
+                + jnp.sqrt(
+                    (2 + iteration) ** 2 * self._norm_A**2
+                    + self._norm_Q**2 / primal_weight**2
+                )
+            )
+        )
+        # We use jnp.true_divide here since it returns inf for division by zero.
+        step_size_limit = (1 + jnp.true_divide(1, iteration)) * last_step_size
+        return jnp.minimum(next_step_size, step_size_limit)
+
     def initialize_solver_status(
         self,
         scaled_problem: ScaledQpProblem,
@@ -374,6 +418,14 @@ class raPDHG(abc.ABC):
         primal_size = len(scaled_qp.variable_lower_bound)
         dual_size = len(scaled_qp.right_hand_side)
 
+        # Primal weight initialization
+        if self.scale_invariant_initial_primal_weight:
+            self._initial_primal_weight = select_initial_primal_weight(
+                scaled_qp, 1.0, 1.0, self.primal_importance
+            )
+        else:
+            self._initial_primal_weight = self.primal_importance
+
         # Step size computation
         if self.adaptive_step_size:
             if isinstance(scaled_qp.constraint_matrix, (BCOO, BCSR)):
@@ -383,23 +435,22 @@ class raPDHG(abc.ABC):
             else:
                 raise ValueError("Unsupported matrix type.")
         else:
-            desired_relative_error = 0.2
-            maximum_singular_value, number_of_power_iterations = (
-                estimate_maximum_singular_value(
-                    scaled_qp.constraint_matrix,
-                    probability_of_failure=0.001,
-                    desired_relative_error=desired_relative_error,
-                )
-            )
-            step_size = (1 - desired_relative_error) / maximum_singular_value
-
-        # Primal weight initialization
-        if self.scale_invariant_initial_primal_weight:
-            self._initial_primal_weight = select_initial_primal_weight(
-                scaled_qp, 1.0, 1.0, self.primal_importance
-            )
-        else:
-            self._initial_primal_weight = self.primal_importance
+            # desired_relative_error = 0.2
+            # maximum_singular_value, number_of_power_iterations = (
+            #     estimate_maximum_singular_value(
+            #         scaled_qp.constraint_matrix,
+            #         probability_of_failure=0.001,
+            #         desired_relative_error=desired_relative_error,
+            #     )
+            # )
+            # step_size = (1 - desired_relative_error) / maximum_singular_value
+            self._norm_A = estimate_maximum_singular_value(scaled_qp.constraint_matrix)[
+                0
+            ]
+            self._norm_Q = estimate_maximum_singular_value(scaled_qp.objective_matrix)[
+                0
+            ]
+            step_size = 1.0  # Placeholder for step size.
 
         if self.warm_start:
             scaled_initial_primal_solution = (
@@ -414,16 +465,21 @@ class raPDHG(abc.ABC):
             scaled_initial_dual_product = (
                 scaled_qp.constraint_matrix_t @ scaled_initial_dual_solution
             )
+            scaled_primal_obj_product = (
+                scaled_qp.objective_matrix @ scaled_initial_primal_solution
+            )
         else:
             scaled_initial_primal_solution = jnp.zeros(primal_size)
             scaled_initial_dual_solution = jnp.zeros(dual_size)
             scaled_initial_primal_product = jnp.zeros(dual_size)
             scaled_initial_dual_product = jnp.zeros(primal_size)
+            scaled_primal_obj_product = jnp.zeros(primal_size)
         solver_state = PdhgSolverState(
             current_primal_solution=scaled_initial_primal_solution,
             current_dual_solution=scaled_initial_dual_solution,
             current_primal_product=scaled_initial_primal_product,
             current_dual_product=scaled_initial_dual_product,
+            current_primal_obj_product=scaled_primal_obj_product,
             solutions_count=0,
             weights_sum=0.0,
             step_size=step_size,
@@ -434,6 +490,7 @@ class raPDHG(abc.ABC):
             avg_dual_solution=scaled_initial_dual_solution,
             avg_primal_product=scaled_initial_primal_product,
             avg_dual_product=scaled_initial_dual_product,
+            avg_primal_obj_product=scaled_primal_obj_product,
             initial_primal_solution=scaled_initial_primal_solution,
             initial_dual_solution=scaled_initial_dual_solution,
             initial_primal_product=scaled_initial_primal_product,
@@ -454,6 +511,7 @@ class raPDHG(abc.ABC):
             primal_diff_product=jnp.zeros(dual_size),
             primal_product=scaled_initial_primal_product,
             dual_product=scaled_initial_dual_product,
+            primal_obj_product=scaled_primal_obj_product,
         )
         return solver_state, last_restart_info
 
@@ -486,14 +544,22 @@ class raPDHG(abc.ABC):
                 self.adaptive_step_size_limit_coef,
             )
         else:
-            delta_primal, delta_primal_product, delta_dual = compute_next_solution(
-                problem, solver_state, solver_state.step_size, 1.0
+            extrapolation_coefficient = solver_state.solutions_count / (
+                solver_state.solutions_count + 1.0
             )
-            step_size = solver_state.step_size
+            step_size = self.calculate_constant_step_size(
+                solver_state.primal_weight,
+                solver_state.solutions_count,
+                solver_state.step_size,
+            )
+            delta_primal, delta_primal_product, delta_dual = compute_next_solution(
+                problem, solver_state, step_size, extrapolation_coefficient
+            )
             line_search_iter = 1
 
         next_primal_solution = solver_state.current_primal_solution + delta_primal
         next_primal_product = solver_state.current_primal_product + delta_primal_product
+        next_primal_obj_product = problem.objective_matrix @ next_primal_solution
         next_dual_solution = solver_state.current_dual_solution + delta_dual
         next_dual_product = problem.constraint_matrix_t @ next_dual_solution
 
@@ -510,6 +576,9 @@ class raPDHG(abc.ABC):
         next_avg_dual_product = solver_state.avg_dual_product + ratio * (
             next_dual_product - solver_state.avg_dual_product
         )
+        next_avg_primal_obj_product = solver_state.avg_primal_obj_product + ratio * (
+            next_primal_obj_product - solver_state.avg_primal_obj_product
+        )
         new_solutions_count = solver_state.solutions_count + 1
         new_weights_sum = solver_state.weights_sum + step_size
 
@@ -518,10 +587,12 @@ class raPDHG(abc.ABC):
             current_dual_solution=next_dual_solution,
             current_primal_product=next_primal_product,
             current_dual_product=next_dual_product,
+            current_primal_obj_product=next_primal_obj_product,
             avg_primal_solution=next_avg_primal_solution,
             avg_dual_solution=next_avg_dual_solution,
             avg_primal_product=next_avg_primal_product,
             avg_dual_product=next_avg_dual_product,
+            avg_primal_obj_product=next_avg_primal_obj_product,
             initial_primal_solution=solver_state.initial_primal_solution,
             initial_dual_solution=solver_state.initial_dual_solution,
             initial_primal_product=solver_state.initial_primal_product,
@@ -644,7 +715,8 @@ class raPDHG(abc.ABC):
             qp_cache,
             solver_state.numerical_error,
             1.0,
-            self.termination_evaluation_frequency * self.display_frequency,
+            average=True,
+            infeasibility_detection=self.infeasibility_detection,
         )
 
         restarted_solver_state, new_last_restart_info = run_restart_scheme(
