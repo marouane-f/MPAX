@@ -185,8 +185,7 @@ def compute_weight_kkt_residual(
 
     weighted_kkt_residual = jnp.maximum(
         jnp.maximum(
-            primal_weight * primal_residual_norm,
-            1 / primal_weight * dual_residual_norm,
+            primal_weight * primal_residual_norm, 1 / primal_weight * dual_residual_norm
         ),
         absolute_gap,
     )
