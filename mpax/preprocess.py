@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from typing import List, Tuple, Union
 
 import jax.numpy as jnp
@@ -549,9 +550,7 @@ def rescale_problem(
     else:
         raise ValueError("Unsupported matrix format.")
 
-    problem = QuadraticProgrammingProblem(
-        **original_problem.__dict__
-    )  # Deepcopy-like functionality
+    problem = deepcopy(original_problem)
 
     num_constraints, num_variables = problem.constraint_matrix.shape
     constraint_rescaling = jnp.ones(num_constraints)
