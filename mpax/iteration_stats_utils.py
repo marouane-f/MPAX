@@ -249,9 +249,7 @@ def compute_convergence_information(
         )
     )
     corrected_dual_obj_value = jax.lax.cond(
-        dual_residual_norm == 0.0,
-        lambda: dual_objective,
-        lambda: -jnp.inf,
+        dual_residual_norm == 0.0, lambda: dual_objective, lambda: -jnp.inf
     )
     absolute_optimality_gap = jnp.abs(primal_objective - dual_objective)
     relative_optimality_gap = absolute_optimality_gap / (
