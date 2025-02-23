@@ -9,11 +9,6 @@ from jax import numpy as jnp
 from jax.experimental.sparse import BCOO, BCSR
 
 
-class OptimalityNorm(IntEnum):
-    L_INF = auto()
-    L2 = auto()
-
-
 class TerminationStatus(IntEnum):
     """
     TerminationStatus explains why the solver stopped.
@@ -73,8 +68,6 @@ class TerminationCriteria(NamedTuple):
 
     Attributes
     ----------
-    optimality_norm : OptimalityNorm
-        The norm that we are measuring the optimality criteria in.
     eps_abs : float
         Absolute tolerance on the duality gap, primal feasibility, and dual feasibility.
     eps_rel : float
@@ -89,7 +82,6 @@ class TerminationCriteria(NamedTuple):
         Iteration limit for the solver. Corresponding termination_status = ITERATION_LIMIT.
     """
 
-    optimality_norm: OptimalityNorm = OptimalityNorm.L2
     eps_abs: float = 1.0e-6
     eps_rel: float = 1.0e-6
     eps_primal_infeasible: float = 1.0e-8
@@ -99,10 +91,8 @@ class TerminationCriteria(NamedTuple):
 
 
 class CachedQuadraticProgramInfo(NamedTuple):
-    l_inf_norm_primal_linear_objective: float
-    l_inf_norm_primal_right_hand_side: float
-    l2_norm_primal_linear_objective: float
-    l2_norm_primal_right_hand_side: float
+    primal_linear_objective_norm: float
+    primal_right_hand_side_norm: float
 
 
 @dataclass
@@ -448,19 +438,14 @@ class ConvergenceInformation(NamedTuple):
     primal_objective: float = 0.0
     dual_objective: float = 0.0
     corrected_dual_objective: float = float("-inf")
-    l_inf_primal_residual: float = 0.0
-    l2_primal_residual: float = 0.0
-    l_inf_dual_residual: float = 0.0
-    l2_dual_residual: float = 0.0
-    relative_l_inf_primal_residual: float = 0.0
-    relative_l2_primal_residual: float = 0.0
-    relative_l_inf_dual_residual: float = 0.0
-    relative_l2_dual_residual: float = 0.0
+    primal_residual_norm: float = 0.0
+    dual_residual_norm: float = 0.0
+    relative_primal_residual_norm: float = 0.0
+    relative_dual_residual_norm: float = 0.0
+    absolute_optimality_gap: float = 0.0
     relative_optimality_gap: float = 0.0
-    l_inf_primal_variable: float = 0.0
-    l2_primal_variable: float = 0.0
-    l_inf_dual_variable: float = 0.0
-    l2_dual_variable: float = 0.0
+    primal_solution_norm: float = 0.0
+    dual_solution_norm: float = 0.0
 
 
 class InfeasibilityInformation(NamedTuple):

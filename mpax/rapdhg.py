@@ -27,7 +27,6 @@ from mpax.termination import (
     check_dual_feasibility,
 )
 from mpax.utils import (
-    OptimalityNorm,
     PdhgSolverState,
     QuadraticProgrammingProblem,
     RestartInfo,
@@ -302,7 +301,7 @@ class raPDHG(abc.ABC):
     jit: bool = True
     unroll: bool = False
     termination_evaluation_frequency: int = 64
-    optimality_norm: int = OptimalityNorm.L2
+    optimality_norm: float = jnp.inf
     eps_abs: float = 1e-4
     eps_rel: float = 1e-4
     eps_primal_infeasible: float = 1e-8
@@ -328,11 +327,13 @@ class raPDHG(abc.ABC):
     warm_start: bool = False
     feasibility_polishing: bool = False
     eps_feas_polish: float = 1e-06
-    infeasibility_detection: bool = False
+    infeasibility_detection: bool = True
 
-    def check_config(self):
+    def check_config(self, is_lp):
+        self.infeasibility_detection = jax.lax.cond(
+            is_lp, lambda: self.infeasibility_detection, lambda: False
+        )
         self._termination_criteria = TerminationCriteria(
-            optimality_norm=self.optimality_norm,
             eps_abs=self.eps_abs,
             eps_rel=self.eps_rel,
             eps_primal_infeasible=self.eps_primal_infeasible,
@@ -350,7 +351,6 @@ class raPDHG(abc.ABC):
             primal_weight_update_smoothing=self.primal_weight_update_smoothing,
         )
         self._polishing_termination_criteria = TerminationCriteria(
-            optimality_norm=self.optimality_norm,
             eps_abs=self.eps_feas_polish,
             eps_rel=self.eps_feas_polish,
             eps_primal_infeasible=self.eps_primal_infeasible,
@@ -665,6 +665,7 @@ class raPDHG(abc.ABC):
             solver_state,
             last_restart_info,
             self._restart_params,
+            self.optimality_norm,
         )
 
         new_solver_state = self.take_step(
@@ -715,6 +716,7 @@ class raPDHG(abc.ABC):
             qp_cache,
             solver_state.numerical_error,
             1.0,
+            self.optimality_norm,
             average=True,
             infeasibility_detection=self.infeasibility_detection,
         )
@@ -724,6 +726,7 @@ class raPDHG(abc.ABC):
             solver_state,
             last_restart_info,
             self._restart_params,
+            self.optimality_norm,
         )
 
         new_solver_state = self.take_multiple_steps(
@@ -812,6 +815,7 @@ class raPDHG(abc.ABC):
             qp_cache,
             1.0,
             self.termination_evaluation_frequency * self.display_frequency,
+            self.optimality_norm,
         )
         return (
             new_primal_polishing_solver_state,
@@ -894,6 +898,7 @@ class raPDHG(abc.ABC):
             qp_cache,
             1.0,
             self.termination_evaluation_frequency * self.display_frequency,
+            self.optimality_norm,
         )
 
         return (
@@ -930,8 +935,10 @@ class raPDHG(abc.ABC):
         setup_logger(self.verbose, self.debug)
         # validate(original_problem)
         # config_check(params)
-        self.check_config()
-        qp_cache = cached_quadratic_program_info(original_problem)
+        self.check_config(original_problem.is_lp)
+        qp_cache = cached_quadratic_program_info(
+            original_problem, norm_ord=self.optimality_norm
+        )
 
         precondition_start_time = timeit.default_timer()
         scaled_problem = rescale_problem(

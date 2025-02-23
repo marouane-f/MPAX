@@ -7,7 +7,6 @@ from mpax.iteration_stats_utils import evaluate_unscaled_iteration_stats
 from mpax.utils import (
     CachedQuadraticProgramInfo,
     ConvergenceInformation,
-    OptimalityNorm,
     QuadraticProgrammingProblem,
     TerminationCriteria,
     TerminationStatus,
@@ -41,7 +40,7 @@ def validate_termination_criteria(criteria: TerminationCriteria) -> None:
 
 
 def cached_quadratic_program_info(
-    qp: QuadraticProgrammingProblem,
+    qp: QuadraticProgrammingProblem, norm_ord: float
 ) -> CachedQuadraticProgramInfo:
     """
     Computes information about the quadratic program used in termination criteria.
@@ -57,25 +56,19 @@ def cached_quadratic_program_info(
         Cached information about the quadratic program.
     """
     return CachedQuadraticProgramInfo(
-        jnp.linalg.norm(qp.objective_vector, jnp.inf),
-        jnp.linalg.norm(qp.right_hand_side, jnp.inf),
-        jnp.linalg.norm(qp.objective_vector, 2),
-        jnp.linalg.norm(qp.right_hand_side, 2),
+        jnp.linalg.norm(qp.objective_vector, ord=norm_ord),
+        jnp.linalg.norm(qp.right_hand_side, ord=norm_ord),
     )
 
 
 def optimality_criteria_met(
-    optimality_norm: OptimalityNorm,
-    rel_tol: float,
-    convergence_information: ConvergenceInformation,
+    rel_tol: float, convergence_information: ConvergenceInformation
 ) -> bool:
     """
     Checks if the algorithm should terminate declaring the optimal solution is found.
 
     Parameters
     ----------
-    optimality_norm : OptimalityNorm
-        The norm to measure the optimality criteria.
     rel_tol : float
         Relative tolerance.
     convergence_information : ConvergenceInformation
@@ -88,16 +81,8 @@ def optimality_criteria_met(
     """
     ci = convergence_information
     gap = ci.relative_optimality_gap
-    dual_err = jax.lax.cond(
-        optimality_norm == OptimalityNorm.L_INF,
-        lambda: ci.relative_l_inf_dual_residual,
-        lambda: ci.relative_l2_dual_residual,
-    )
-    primal_err = jax.lax.cond(
-        optimality_norm == OptimalityNorm.L_INF,
-        lambda: ci.relative_l_inf_primal_residual,
-        lambda: ci.relative_l2_primal_residual,
-    )
+    dual_err = ci.relative_dual_residual_norm
+    primal_err = ci.relative_primal_residual_norm
     return (dual_err < rel_tol) & (primal_err < rel_tol) & (gap < rel_tol)
 
 
@@ -164,6 +149,7 @@ def check_termination_criteria(
     qp_cache: CachedQuadraticProgramInfo,
     numerical_error: bool,
     elapsed_time: float,
+    norm_ord: float,
     average: bool = True,
     infeasibility_detection: bool = True,
 ) -> Union[str, bool]:
@@ -191,6 +177,7 @@ def check_termination_criteria(
         solver_state,
         elapsed_time,
         eps_ratio,
+        norm_ord,
         average,
         infeasibility_detection,
     )
@@ -198,13 +185,10 @@ def check_termination_criteria(
     termination_status = TerminationStatus.UNSPECIFIED
     should_terminate, termination_status = jax.lax.cond(
         optimality_criteria_met(
-            criteria.optimality_norm,
-            criteria.eps_rel,
-            current_iteration_stats.convergence_information,
+            criteria.eps_rel, current_iteration_stats.convergence_information
         ),
-        lambda _: (True, TerminationStatus.OPTIMAL),
-        lambda _: (should_terminate, termination_status),
-        operand=None,
+        lambda: (True, TerminationStatus.OPTIMAL),
+        lambda: (should_terminate, termination_status),
     )
 
     should_terminate, termination_status = jax.lax.cond(
@@ -213,9 +197,8 @@ def check_termination_criteria(
             criteria.eps_primal_infeasible,
             current_iteration_stats.infeasibility_information,
         ),
-        lambda _: (True, TerminationStatus.PRIMAL_INFEASIBLE),
-        lambda _: (should_terminate, termination_status),
-        operand=None,
+        lambda: (True, TerminationStatus.PRIMAL_INFEASIBLE),
+        lambda: (should_terminate, termination_status),
     )
 
     should_terminate, termination_status = jax.lax.cond(
@@ -224,17 +207,15 @@ def check_termination_criteria(
             criteria.eps_dual_infeasible,
             current_iteration_stats.infeasibility_information,
         ),
-        lambda _: (True, TerminationStatus.DUAL_INFEASIBLE),
-        lambda _: (should_terminate, termination_status),
-        operand=None,
+        lambda: (True, TerminationStatus.DUAL_INFEASIBLE),
+        lambda: (should_terminate, termination_status),
     )
 
     should_terminate, termination_status = jax.lax.cond(
         (should_terminate == False)
         & (current_iteration_stats.iteration_number >= criteria.iteration_limit),
-        lambda _: (True, TerminationStatus.ITERATION_LIMIT),
-        lambda _: (should_terminate, termination_status),
-        operand=None,
+        lambda: (True, TerminationStatus.ITERATION_LIMIT),
+        lambda: (should_terminate, termination_status),
     )
 
     # should_terminate, termination_status = jax.lax.cond(
@@ -266,6 +247,7 @@ def check_primal_feasibility(
     criteria: TerminationCriteria,
     qp_cache: CachedQuadraticProgramInfo,
     elapsed_time: float,
+    norm_ord: float,
     average: bool = True,
 ) -> bool:
     """
@@ -283,6 +265,8 @@ def check_primal_feasibility(
         Cached information about the quadratic program.
     elapsed_time : float
         Elapsed time since the start of the algorithm.
+    norm_ord : float
+        Order of the norm.
     average : bool, optional
         Whether is raPDHG, by default True.
 
@@ -298,21 +282,12 @@ def check_primal_feasibility(
         solver_state,
         elapsed_time,
         eps_ratio,
+        norm_ord,
         average,
         infeasibility_detection=False,
     )
     ci = current_iteration_stats.convergence_information
-    primal_err = jax.lax.cond(
-        criteria.optimality_norm == OptimalityNorm.L_INF,
-        lambda: ci.l_inf_primal_residual,
-        lambda: ci.l2_primal_residual,
-    )
-    primal_err_baseline = jax.lax.cond(
-        criteria.optimality_norm == OptimalityNorm.L_INF,
-        lambda: qp_cache.l_inf_norm_primal_right_hand_side,
-        lambda: qp_cache.l2_norm_primal_right_hand_side,
-    )
-    return primal_err < criteria.eps_abs + criteria.eps_rel * primal_err_baseline
+    return ci.relative_primal_residual_norm < criteria.eps_rel
 
 
 def check_dual_feasibility(
@@ -321,6 +296,7 @@ def check_dual_feasibility(
     criteria: TerminationCriteria,
     qp_cache: CachedQuadraticProgramInfo,
     elapsed_time: float,
+    norm_ord: float,
     average: bool = True,
 ) -> Union[str, bool]:
     """
@@ -338,6 +314,8 @@ def check_dual_feasibility(
         Cached information about the quadratic program.
     elapsed_time : float
         Elapsed time since the start of the algorithm.
+    norm_ord : float
+        Order of the norm.
     average : bool, optional
         Whether is raPDHG, by default True.
 
@@ -353,18 +331,9 @@ def check_dual_feasibility(
         solver_state,
         elapsed_time,
         eps_ratio,
+        norm_ord,
         average,
         infeasibility_detection=False,
     )
     ci = current_iteration_stats.convergence_information
-    dual_err = jax.lax.cond(
-        criteria.optimality_norm == OptimalityNorm.L_INF,
-        lambda: ci.l_inf_dual_residual,
-        lambda: ci.l2_dual_residual,
-    )
-    dual_err_baseline = jax.lax.cond(
-        criteria.optimality_norm == OptimalityNorm.L_INF,
-        lambda: qp_cache.l_inf_norm_primal_linear_objective,
-        lambda: qp_cache.l2_norm_primal_linear_objective,
-    )
-    return dual_err < criteria.eps_abs + criteria.eps_rel * dual_err_baseline
+    return ci.relative_dual_residual_norm < criteria.eps_rel

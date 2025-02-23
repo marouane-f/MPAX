@@ -301,7 +301,7 @@ def create_lp(c, A, b, G, h, l, u, use_sparse_matrix=True):
         inequalities_mask=jnp.concatenate(
             [jnp.full(len(b), False), jnp.full(len(h), True)]
         ),
-        is_lp=False,
+        is_lp=True,
     )
     return problem
 

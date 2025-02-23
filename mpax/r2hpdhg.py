@@ -26,7 +26,6 @@ from mpax.termination import (
     check_dual_feasibility,
 )
 from mpax.utils import (
-    OptimalityNorm,
     PdhgSolverState,
     QuadraticProgrammingProblem,
     RestartInfo,
@@ -57,7 +56,7 @@ class r2HPDHG(raPDHG):
     jit: bool = True
     unroll: bool = False
     termination_evaluation_frequency: int = 100
-    optimality_norm: int = OptimalityNorm.L2
+    optimality_norm: float = jnp.inf
     eps_abs: float = 1e-4
     eps_rel: float = 1e-4
     eps_primal_infeasible: float = 1e-8
@@ -83,6 +82,7 @@ class r2HPDHG(raPDHG):
     warm_start: bool = False
     feasibility_polishing: bool = False
     eps_feas_polish: float = 1e-06
+    infeasibility_detection: bool = True
 
     def take_step(
         self, solver_state: PdhgSolverState, problem: QuadraticProgrammingProblem
@@ -409,6 +409,7 @@ class r2HPDHG(raPDHG):
             qp_cache,
             solver_state.numerical_error,
             1.0,
+            self.optimality_norm,
             False,
         )
 
@@ -500,6 +501,7 @@ class r2HPDHG(raPDHG):
             qp_cache,
             1.0,
             self.termination_evaluation_frequency * self.display_frequency,
+            self.optimality_norm,
             average=False,
         )
         return (
@@ -582,6 +584,7 @@ class r2HPDHG(raPDHG):
             qp_cache,
             1.0,
             self.termination_evaluation_frequency * self.display_frequency,
+            self.optimality_norm,
             average=False,
         )
 
@@ -615,8 +618,8 @@ class r2HPDHG(raPDHG):
         setup_logger(self.verbose, self.debug)
         # validate(original_problem)
         # config_check(params)
-        self.check_config()
-        qp_cache = cached_quadratic_program_info(original_problem)
+        self.check_config(original_problem.is_lp)
+        qp_cache = cached_quadratic_program_info(original_problem, self.optimality_norm)
 
         precondition_start_time = timeit.default_timer()
         scaled_problem = rescale_problem(

@@ -90,7 +90,7 @@ def compute_weight_kkt_residual(
     dual_product: jnp.ndarray,
     primal_obj_product: jnp.ndarray,
     primal_weight: float,
-    norm_ord: int = jnp.inf,
+    norm_ord: float,
 ) -> float:
     """
     Compute the weighted KKT residual for restarting based on the current iterate values.
@@ -111,7 +111,7 @@ def compute_weight_kkt_residual(
         Primal objective product.
     primal_weight : float
         Weight factor for primal.
-    norm_ord : int
+    norm_ord : float
         Order of the norm.
 
     Returns
@@ -182,19 +182,25 @@ def compute_weight_kkt_residual(
     relative_gap = absolute_gap / (
         1 + jnp.maximum(jnp.abs(primal_objective), jnp.abs(dual_objective))
     )
-
-    weighted_kkt_residual = jnp.maximum(
-        jnp.maximum(
-            primal_weight * primal_residual_norm, 1 / primal_weight * dual_residual_norm
+    weighted_kkt_residual = jnp.linalg.norm(
+        jnp.array(
+            [
+                primal_weight * primal_residual_norm,
+                1 / primal_weight * dual_residual_norm,
+                absolute_gap,
+            ]
         ),
-        absolute_gap,
+        ord=norm_ord,
     )
-    relative_weighted_kkt_residual = jnp.maximum(
-        jnp.maximum(
-            primal_weight * relative_primal_residual_norm,
-            1 / primal_weight * relative_dual_residual_norm,
+    relative_weighted_kkt_residual = jnp.linalg.norm(
+        jnp.array(
+            [
+                primal_weight * relative_primal_residual_norm,
+                1 / primal_weight * relative_dual_residual_norm,
+                relative_gap,
+            ]
         ),
-        relative_gap,
+        ord=norm_ord,
     )
     return jax.lax.cond(
         problem.is_lp,
@@ -265,6 +271,7 @@ def should_do_adaptive_restart_kkt(
     restart_params: RestartParameters,
     last_restart_info: RestartInfo,
     primal_weight: float,
+    norm_ord: float,
 ) -> bool:
     """
     Checks if an adaptive restart should be triggered based on KKT residual reduction.
@@ -281,6 +288,8 @@ def should_do_adaptive_restart_kkt(
         Information from the last restart.
     primal_weight : float
         The weight for the primal variable norm.
+    norm_ord : float
+        The order of the norm.
 
     Returns
     -------
@@ -295,6 +304,7 @@ def should_do_adaptive_restart_kkt(
         last_restart_info.dual_product,
         last_restart_info.primal_obj_product,
         primal_weight,
+        norm_ord,
     )
 
     # Stop gradient since kkt_last_residual might be zero.
@@ -412,7 +422,9 @@ def should_do_adaptive_restart_fixed_point(
     return do_restart, reduction_ratio
 
 
-def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart_info):
+def restart_criteria_met_kkt(
+    restart_params, problem, solver_state, last_restart_info, norm_ord
+):
     # Computational expensive!!!
     current_kkt_res = compute_weight_kkt_residual(
         problem,
@@ -422,6 +434,7 @@ def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart
         solver_state.current_dual_product,
         solver_state.current_primal_obj_product,
         solver_state.primal_weight,
+        norm_ord,
     )
     avg_kkt_res = compute_weight_kkt_residual(
         problem,
@@ -431,6 +444,7 @@ def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart
         solver_state.avg_dual_product,
         solver_state.avg_primal_obj_product,
         solver_state.primal_weight,
+        norm_ord,
     )
     reset_to_average = jax.lax.cond(
         restart_params.restart_to_current_metric == RestartToCurrentMetric.KKT_GREEDY,
@@ -448,6 +462,7 @@ def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart
         restart_params,
         last_restart_info,
         solver_state.primal_weight,
+        norm_ord,
     )
     do_restart = jax.lax.cond(
         (
@@ -606,6 +621,7 @@ def run_restart_scheme(
     solver_state: PdhgSolverState,
     last_restart_info: RestartInfo,
     restart_params: RestartParameters,
+    norm_ord: float,
 ):
     """
     Check restart criteria based on current and average KKT residuals.
@@ -620,6 +636,8 @@ def run_restart_scheme(
         Information from the last restart.
     restart_params : RestartParameters
         Parameters for controlling restart behavior.
+    norm_ord : float
+        Order of the norm.
 
     Returns
     -------
@@ -631,7 +649,7 @@ def run_restart_scheme(
         solver_state.solutions_count == 0,
         lambda: (False, False, last_restart_info.reduction_ratio_last_trial),
         lambda: restart_criteria_met_kkt(
-            restart_params, problem, solver_state, last_restart_info
+            restart_params, problem, solver_state, last_restart_info, norm_ord
         ),
     )
     return jax.lax.cond(
