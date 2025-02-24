@@ -29,6 +29,7 @@ def unscaled_saddle_point_output(
     dual_solution: jnp.ndarray,
     termination_status: TerminationStatus,
     iterations_completed: int,
+    convergence_information,
 ) -> SaddlePointOutput:
     """
     Return the unscaled primal and dual solutions.
@@ -45,6 +46,8 @@ def unscaled_saddle_point_output(
         Reason for termination.
     iterations_completed : int
         Number of iterations completed.
+    convergence_information : ConvergenceInformation
+        Convergence information.
 
     Returns
     -------
@@ -59,6 +62,15 @@ def unscaled_saddle_point_output(
         dual_solution=original_dual_solution,
         termination_status=termination_status,
         iteration_count=iterations_completed,
+        primal_objective=convergence_information.primal_objective,
+        dual_objective=convergence_information.dual_objective,
+        corrected_dual_objective=convergence_information.corrected_dual_objective,
+        primal_residual_norm=convergence_information.primal_residual_norm,
+        dual_residual_norm=convergence_information.dual_residual_norm,
+        relative_primal_residual_norm=convergence_information.relative_primal_residual_norm,
+        relative_dual_residual_norm=convergence_information.relative_dual_residual_norm,
+        absolute_optimality_gap=convergence_information.absolute_optimality_gap,
+        relative_optimality_gap=convergence_information.relative_optimality_gap,
     )
 
 

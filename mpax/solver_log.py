@@ -407,6 +407,7 @@ def pdhg_final_log(
     iteration: int,
     termination_status: TerminationStatus,
     timing: TimingData,
+    convergence_information,
 ):
     """
     Logs the final statistics and results of the PDHG algorithm.
@@ -426,27 +427,6 @@ def pdhg_final_log(
     timing : TimingData
         Timing information.
     """
-    # logger.info("Avg solution:")
-
-    # logger.info(
-    #     "  pr_infeas=%12g pr_obj=%15.10g dual_infeas=%12g dual_obj=%15.10g",
-    #     last_iteration_stats.convergence_information.l_inf_primal_residual,
-    #     last_iteration_stats.convergence_information.primal_objective,
-    #     last_iteration_stats.convergence_information.l_inf_dual_residual,
-    #     last_iteration_stats.convergence_information.dual_objective,
-    # )
-
-    # logger.debug(
-    #     "For %s candidate: \n"
-    #     "Primal objective: %.6f, "
-    #     "Dual objective: %.6f, "
-    #     "Corrected dual objective: %.6f",
-    #     last_iteration_stats.convergence_information.candidate_type,
-    #     last_iteration_stats.convergence_information.primal_objective,
-    #     last_iteration_stats.convergence_information.dual_objective,
-    #     last_iteration_stats.convergence_information.corrected_dual_objective,
-    # )
-
     if logging.root.level <= logging.INFO:
         # Print primal norms
         jax_debug_log(
@@ -470,6 +450,28 @@ def pdhg_final_log(
             "Terminated after {:d} iterations. Termination Status: {:d}",
             iteration,
             termination_status,
+            logger=logger,
+            level=logging.INFO,
+        )
+        jax_debug_log(
+            "- Primal objective: {:.10e}\n"
+            "- Dual objective: {:.10e}\n"
+            "- Corrected dual objective: {:.10e}\n"
+            "- Abs gap: {:.5e}\n"
+            "- Rel gap: {:.5e}\n"
+            "- Abs Primal residual: {:.5e}\n"
+            "- Abs Dual residual: {:.5e}\n"
+            "- Rel primal residual: {:.5e}\n"
+            "- Rel dual residual: {:.5e}",
+            convergence_information.primal_objective,
+            convergence_information.dual_objective,
+            convergence_information.corrected_dual_objective,
+            convergence_information.absolute_optimality_gap,
+            convergence_information.relative_optimality_gap,
+            convergence_information.primal_residual_norm,
+            convergence_information.dual_residual_norm,
+            convergence_information.relative_primal_residual_norm,
+            convergence_information.relative_dual_residual_norm,
             logger=logger,
             level=logging.INFO,
         )

@@ -33,6 +33,7 @@ from mpax.utils import (
     RestartToCurrentMetric,
     SaddlePointOutput,
     TerminationStatus,
+    ConvergenceInformation,
 )
 from mpax.feasibility_polishing import (
     set_dual_solution_to_zero,
@@ -40,6 +41,7 @@ from mpax.feasibility_polishing import (
     init_primal_feasibility_polishing,
     init_dual_feasibility_polishing,
 )
+from mpax.iteration_stats_utils import compute_convergence_information
 
 logger = logging.getLogger(__name__)
 
@@ -400,17 +402,20 @@ class r2HPDHG(raPDHG):
         should_terminate,
         scaled_problem,
         qp_cache,
+        ci,
     ):
         # Check for termination
-        should_terminate, termination_status = check_termination_criteria(
-            scaled_problem,
-            solver_state,
-            self._termination_criteria,
-            qp_cache,
-            solver_state.numerical_error,
-            1.0,
-            self.optimality_norm,
-            False,
+        should_terminate, termination_status, convergence_information = (
+            check_termination_criteria(
+                scaled_problem,
+                solver_state,
+                self._termination_criteria,
+                qp_cache,
+                solver_state.numerical_error,
+                1.0,
+                self.optimality_norm,
+                False,
+            )
         )
 
         restarted_solver_state, new_last_restart_info = self.run_restart_scheme(
@@ -427,6 +432,7 @@ class r2HPDHG(raPDHG):
             should_terminate,
             scaled_problem,
             qp_cache,
+            convergence_information,
         )
 
     def primal_feasibility_polishing(self, solver_state, scaled_problem, qp_cache):
@@ -648,10 +654,17 @@ class r2HPDHG(raPDHG):
             jit=self.jit,
         )
 
-        (solver_state, last_restart_info, should_terminate, _, _) = while_loop(
+        (solver_state, last_restart_info, should_terminate, _, _, ci) = while_loop(
             cond_fun=lambda state: state[2] == False,
             body_fun=lambda state: self.main_iteration_update(*state),
-            init_val=(solver_state, last_restart_info, False, scaled_problem, qp_cache),
+            init_val=(
+                solver_state,
+                last_restart_info,
+                False,
+                scaled_problem,
+                qp_cache,
+                ConvergenceInformation(),
+            ),
             maxiter=self.iteration_limit,
             unroll=self.unroll,
             jit=self.jit,
@@ -676,6 +689,7 @@ class r2HPDHG(raPDHG):
                 solver_state.current_primal_product,
                 solver_state.current_dual_solution,
                 solver_state.current_dual_product,
+                solver_state.current_primal_obj_product,
             ) = cond(
                 primal_feasibility & dual_feasibility,
                 lambda: (
@@ -685,13 +699,31 @@ class r2HPDHG(raPDHG):
                     polished_dual_solution,
                     scaled_problem.scaled_qp.constraint_matrix_t
                     @ polished_dual_solution,
+                    scaled_problem.scaled_qp.objective_matrix
+                    @ polished_primal_solution,
                 ),
                 lambda: (
                     solver_state.current_primal_solution,
                     solver_state.current_primal_product,
                     solver_state.current_dual_solution,
                     solver_state.current_dual_product,
+                    solver_state.current_primal_obj_product,
                 ),
+            )
+            ci = compute_convergence_information(
+                scaled_problem.original_qp,
+                qp_cache,
+                solver_state.current_primal_solution
+                / scaled_problem.variable_rescaling,
+                solver_state.current_dual_solution
+                / scaled_problem.constraint_rescaling,
+                self.abs_rel / self.rel_eps,
+                solver_state.current_primal_product
+                * scaled_problem.constraint_rescaling,
+                solver_state.current_dual_product * scaled_problem.variable_rescaling,
+                solver_state.current_primal_obj_product
+                * scaled_problem.variable_rescaling,
+                self.optimality_norm,
             )
         else:
             feasibility_polishing_time = 0
@@ -710,6 +742,7 @@ class r2HPDHG(raPDHG):
             solver_state.num_iterations,
             solver_state.termination_status,
             timing,
+            ci,
         )
         return unscaled_saddle_point_output(
             scaled_problem,
@@ -717,4 +750,5 @@ class r2HPDHG(raPDHG):
             solver_state.current_dual_solution,
             solver_state.termination_status,
             solver_state.num_iterations - 1,
+            ci,
         )

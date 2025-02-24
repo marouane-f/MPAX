@@ -233,12 +233,39 @@ class SaddlePointOutput(NamedTuple):
         One of the possible values from the TerminationStatus IntEnum.
     iteration_count : int
         The total number of algorithmic iterations for the solve.
+    primal_objective: float
+        The primal objective value.
+    dual_objective: float
+        The dual objective value.
+    corrected_dual_objective: float
+        The corrected dual objective value.
+    primal_residual_norm: float
+        The norm of the primal residual.
+    dual_residual_norm: float
+        The norm of the dual residual.
+    relative_primal_residual_norm: float
+        The relative norm of the primal residual.
+    relative_dual_residual_norm: float
+        The relative norm of the dual residual.
+    absolute_optimality_gap: float
+        The absolute optimality gap.
+    relative_optimality_gap: float
+        The relative optimality gap.
     """
 
     primal_solution: jnp.ndarray
     dual_solution: jnp.ndarray
     termination_status: TerminationStatus
     iteration_count: int
+    primal_objective: float
+    dual_objective: float
+    corrected_dual_objective: float
+    primal_residual_norm: float
+    dual_residual_norm: float
+    relative_primal_residual_norm: float
+    relative_dual_residual_norm: float
+    absolute_optimality_gap: float
+    relative_optimality_gap: float
 
 
 @chex.dataclass

@@ -135,7 +135,6 @@ def compute_convergence_information(
     qp_cache: CachedQuadraticProgramInfo,
     primal_iterate: jnp.ndarray,
     dual_iterate: jnp.ndarray,
-    dual_residual: jnp.ndarray,
     eps_ratio: float,
     primal_product: jnp.ndarray,
     dual_product: jnp.ndarray,
@@ -227,6 +226,9 @@ def compute_convergence_information(
         primal_obj_product,
         problem.objective_constant,
     )
+    dual_residual = jnp.where(
+        problem.inequalities_mask, jnp.maximum(-dual_iterate, 0.0), 0.0
+    )
     dual_residual_norm = jnp.linalg.norm(
         jnp.concatenate([dual_residual, reduced_costs_violation]), ord=norm_ord
     )
@@ -275,7 +277,6 @@ def compute_infeasibility_information(
     problem: QuadraticProgrammingProblem,
     primal_ray_estimate: jnp.ndarray,
     dual_ray_estimate: jnp.ndarray,
-    dual_residual: jnp.ndarray,
     primal_ray_estimate_product: jnp.ndarray,
     dual_ray_estimate_product: jnp.ndarray,
     primal_ray_estimate_obj_product: jnp.ndarray,
@@ -295,6 +296,8 @@ def compute_infeasibility_information(
         Primal ray estimate product vector.
     dual_ray_estimate_product : jnp.ndarray
         Dual ray estimate product vector.
+    primal_ray_estimate_obj_product : jnp.ndarray
+        Primal ray estimate objective product vector.
 
     Returns
     -------
@@ -356,12 +359,14 @@ def compute_infeasibility_information(
         primal_ray_estimate_obj_product,
         problem.objective_constant,
     )
-
+    dual_residual = jnp.where(
+        problem.inequalities_mask, jnp.maximum(-dual_ray_estimate, 0.0), 0.0
+    )
     l_inf_dual_residual = jnp.linalg.norm(
         jnp.concatenate([dual_residual, reduced_costs_violation]), ord=jnp.inf
     )
 
-    scaling_factor = jax.lax.max(
+    scaling_factor = jnp.maximum(
         jnp.linalg.norm(scaled_primal_ray_estimate, ord=jnp.inf),
         jnp.linalg.norm(reduced_costs, ord=jnp.inf),
     )
@@ -440,17 +445,11 @@ def evaluate_unscaled_iteration_stats(
             solver_state.current_primal_obj_product * scaled_problem.variable_rescaling,
         ),
     )
-    unscaled_dual_residual = jnp.where(
-        scaled_problem.original_qp.inequalities_mask,
-        jnp.maximum(-unscaled_dual_solution, 0.0),
-        0.0,
-    )
     convergence_information = compute_convergence_information(
         scaled_problem.original_qp,
         qp_cache,
         unscaled_primal_solution,
         unscaled_dual_solution,
-        unscaled_dual_residual,
         eps_ratio,
         unscaled_primal_product,
         unscaled_dual_product,
@@ -464,7 +463,6 @@ def evaluate_unscaled_iteration_stats(
             scaled_problem.original_qp,
             unscaled_primal_solution,
             unscaled_dual_solution,
-            unscaled_dual_residual,
             unscaled_primal_product,
             unscaled_dual_product,
             unscaled_primal_obj_product,

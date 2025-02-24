@@ -238,7 +238,11 @@ def check_termination_criteria(
     #     lambda _: (should_terminate, termination_status),
     #     operand=None,
     # )
-    return should_terminate, termination_status
+    return (
+        should_terminate,
+        termination_status,
+        current_iteration_stats.convergence_information,
+    )
 
 
 def check_primal_feasibility(

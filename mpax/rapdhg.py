@@ -37,6 +37,7 @@ from mpax.utils import (
     TerminationCriteria,
     TerminationStatus,
     ScaledQpProblem,
+    ConvergenceInformation,
 )
 from mpax.feasibility_polishing import (
     init_primal_feasibility_polishing,
@@ -44,6 +45,7 @@ from mpax.feasibility_polishing import (
     init_dual_feasibility_polishing,
     set_primal_solution_to_zero,
 )
+from mpax.iteration_stats_utils import compute_convergence_information
 
 logger = logging.getLogger(__name__)
 
@@ -687,6 +689,7 @@ class raPDHG(abc.ABC):
         should_terminate,
         scaled_problem,
         qp_cache,
+        ci,
     ):
         """The inner loop of PDLP algorithm.
 
@@ -709,16 +712,18 @@ class raPDHG(abc.ABC):
             The updated solver state, the updated last restart info, whether to terminate, the scaled problem, and the cached quadratic programming information.
         """
         # Check for termination
-        should_terminate, termination_status = check_termination_criteria(
-            scaled_problem,
-            solver_state,
-            self._termination_criteria,
-            qp_cache,
-            solver_state.numerical_error,
-            1.0,
-            self.optimality_norm,
-            average=True,
-            infeasibility_detection=self.infeasibility_detection,
+        new_should_terminate, new_termination_status, new_convergence_information = (
+            check_termination_criteria(
+                scaled_problem,
+                solver_state,
+                self._termination_criteria,
+                qp_cache,
+                solver_state.numerical_error,
+                1.0,
+                self.optimality_norm,
+                average=True,
+                infeasibility_detection=self.infeasibility_detection,
+            )
         )
 
         restarted_solver_state, new_last_restart_info = run_restart_scheme(
@@ -732,13 +737,14 @@ class raPDHG(abc.ABC):
         new_solver_state = self.take_multiple_steps(
             restarted_solver_state, scaled_problem.scaled_qp
         )
-        new_solver_state.termination_status = termination_status
+        new_solver_state.termination_status = new_termination_status
         return (
             new_solver_state,
             new_last_restart_info,
-            should_terminate,
+            new_should_terminate,
             scaled_problem,
             qp_cache,
+            new_convergence_information,
         )
 
     def primal_feasibility_polishing(self, solver_state, scaled_problem, qp_cache):
@@ -968,10 +974,17 @@ class raPDHG(abc.ABC):
             jit=self.jit,
         )
 
-        (solver_state, last_restart_info, should_terminate, _, _) = while_loop(
+        (solver_state, last_restart_info, should_terminate, _, _, ci) = while_loop(
             cond_fun=lambda state: state[2] == False,
             body_fun=lambda state: self.main_iteration_update(*state),
-            init_val=(solver_state, last_restart_info, False, scaled_problem, qp_cache),
+            init_val=(
+                solver_state,
+                last_restart_info,
+                False,
+                scaled_problem,
+                qp_cache,
+                ConvergenceInformation(),
+            ),
             maxiter=self.iteration_limit,
             unroll=self.unroll,
             jit=self.jit,
@@ -996,6 +1009,7 @@ class raPDHG(abc.ABC):
                 solver_state.avg_primal_product,
                 solver_state.avg_dual_solution,
                 solver_state.avg_dual_product,
+                solver_state.avg_primal_obj_product,
             ) = jax.lax.cond(
                 primal_feasibility & dual_feasibility,
                 lambda: (
@@ -1005,13 +1019,27 @@ class raPDHG(abc.ABC):
                     polished_dual_solution,
                     scaled_problem.scaled_qp.constraint_matrix_t
                     @ polished_dual_solution,
+                    scaled_problem.scaled_qp.objective_matrix
+                    @ polished_primal_solution,
                 ),
                 lambda: (
                     solver_state.avg_primal_solution,
                     solver_state.avg_primal_product,
                     solver_state.avg_dual_solution,
                     solver_state.avg_dual_product,
+                    solver_state.avg_primal_obj_product,
                 ),
+            )
+            ci = compute_convergence_information(
+                scaled_problem.original_qp,
+                qp_cache,
+                solver_state.avg_primal_solution / scaled_problem.variable_rescaling,
+                solver_state.avg_dual_solution / scaled_problem.constraint_rescaling,
+                self.abs_rel / self.rel_eps,
+                solver_state.avg_primal_product * scaled_problem.constraint_rescaling,
+                solver_state.avg_dual_product * scaled_problem.variable_rescaling,
+                solver_state.avg_primal_obj_product * scaled_problem.variable_rescaling,
+                self.optimality_norm,
             )
         else:
             feasibility_polishing_time = 0
@@ -1030,6 +1058,7 @@ class raPDHG(abc.ABC):
             solver_state.num_iterations,
             solver_state.termination_status,
             timing,
+            ci,
         )
         return unscaled_saddle_point_output(
             scaled_problem,
@@ -1037,4 +1066,5 @@ class raPDHG(abc.ABC):
             solver_state.avg_dual_solution,
             solver_state.termination_status,
             solver_state.num_iterations - 1,
+            ci,
         )
