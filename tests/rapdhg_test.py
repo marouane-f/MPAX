@@ -17,53 +17,60 @@ from mpax.rapdhg import raPDHG
 config.update("jax_enable_x64", True)
 pytest_cache_dir = str(Path(__file__).parent.parent / ".pytest_cache")
 
-models_obj = {
-    "gen-ip054.mps": 6.765209043e03,
-    "flugpl.mps": 1.167185726e06,
+lp_model_objs = {"gen-ip054.mps": 6.765209043e03, "flugpl.mps": 1.167185726e06}
+qp_model_objs = {
     "maros_meszaros_dataset1/AUG2DC.QPS": 1.8183681e06,
+    "maros_meszaros_dataset1/AUG3DCQP.QPS": 9.9336215e02,
 }
 
 
-def test_rapdhg():
+def test_rapdhg_lp():
     """Test the raPDHG solver on a sample LP problem."""
-    for model, expected_obj in models_obj.items():
-        gurobi_model = gp.read(pytest_cache_dir + "/" + model)
+    for model_filename, expected_obj in lp_model_objs.items():
+        gurobi_model = gp.read(pytest_cache_dir + "/" + model_filename)
         qp = create_qp_from_gurobi(gurobi_model)
-        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6, verbose=True)
+        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6)
         result = solver.optimize(qp)
-        objective_value = (
-            0.5
-            * result.primal_solution.T
-            @ qp.objective_matrix
-            @ result.primal_solution
-            + jnp.dot(qp.objective_vector, result.primal_solution)
-            + qp.objective_constant
-        )
 
-        assert pytest.approx(objective_value, rel=1e-2) == expected_obj
+        assert pytest.approx(result.primal_objective, rel=1e-2) == expected_obj
 
 
-def test_rapdhg_with_jit():
+def test_rapdhg_qp():
     """Test the raPDHG solver on a sample LP problem."""
-    for model, expected_obj in models_obj.items():
-        gurobi_model = gp.read(pytest_cache_dir + "/" + model)
+    for model_filename, expected_obj in qp_model_objs.items():
+        gurobi_model = gp.read(pytest_cache_dir + "/" + model_filename)
+        qp = create_qp_from_gurobi(gurobi_model)
+        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6, is_lp=False)
+        result = solver.optimize(qp)
+
+        assert pytest.approx(result.primal_objective, rel=1e-2) == expected_obj
+
+
+def test_rapdhg_lp_with_jit():
+    """Test the raPDHG solver on a sample LP problem."""
+    for model_filename, expected_obj in lp_model_objs.items():
+        gurobi_model = gp.read(pytest_cache_dir + "/" + model_filename)
         qp = create_qp_from_gurobi(gurobi_model)
         solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6)
         jit_optimize = jit(solver.optimize)
         result = jit_optimize(qp)
-        objective_value = (
-            0.5
-            * result.primal_solution.T
-            @ qp.objective_matrix
-            @ result.primal_solution
-            + jnp.dot(qp.objective_vector, result.primal_solution)
-            + qp.objective_constant
-        )
 
-        assert pytest.approx(objective_value, rel=1e-2) == expected_obj
+        assert pytest.approx(result.primal_objective, rel=1e-2) == expected_obj
 
 
-def test_rapdhg_with_vmap():
+def test_rapdhg_qp_with_jit():
+    """Test the raPDHG solver on a sample LP problem."""
+    for model_filename, expected_obj in qp_model_objs.items():
+        gurobi_model = gp.read(pytest_cache_dir + "/" + model_filename)
+        qp = create_qp_from_gurobi(gurobi_model)
+        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6, is_lp=False)
+        jit_optimize = jit(solver.optimize)
+        result = jit_optimize(qp)
+
+        assert pytest.approx(result.primal_objective, rel=1e-2) == expected_obj
+
+
+def test_rapdhg_lp_with_vmap():
     """Test the raPDHG solver on a batch of LP problems."""
     var, prob = LpProblem.fromMPS(pytest_cache_dir + "/gen-ip054.mps")
     c, integrality, constraints, bounds = convert_all(prob)
@@ -91,10 +98,7 @@ def test_rapdhg_with_vmap():
     def solve_single(c):
         boxed_lp = create_lp(c, A, b, G, h, var_lb, var_ub)
         result = solver.optimize(boxed_lp)
-        return (
-            jnp.dot(boxed_lp.objective_vector, result.primal_solution)
-            + boxed_lp.objective_constant
-        )
+        return result.primal_objective
 
     jit_solve_single = jit(solve_single)
 
@@ -147,11 +151,6 @@ def test_rapdhg_with_sharding():
     jit_optimize = jax.jit(solver.optimize)
     result = jit_optimize(lp_sharded)
 
-    objective_value = (
-        jnp.dot(lp_sharded.objective_vector, result.primal_solution)
-        + lp_sharded.objective_constant
-    )
-
     # Expected optimal objective value
     expected_obj = 1.167185726e06
-    assert pytest.approx(objective_value, rel=1e-2) == expected_obj
+    assert pytest.approx(result.primal_objective, rel=1e-2) == expected_obj

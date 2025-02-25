@@ -330,11 +330,14 @@ class raPDHG(abc.ABC):
     feasibility_polishing: bool = False
     eps_feas_polish: float = 1e-06
     infeasibility_detection: bool = True
+    is_lp: bool = True  # TBD: I am not sure if it is a good design.
 
-    def check_config(self, is_lp):
-        self.infeasibility_detection = jax.lax.cond(
-            is_lp, lambda: self.infeasibility_detection, lambda: False
-        )
+    def check_config(self):
+        if not self.is_lp:
+            self.infeasibility_detection = False
+            self.primal_weight_update_smoothing = 0.2
+            self.adaptive_step_size = False
+
         self._termination_criteria = TerminationCriteria(
             eps_abs=self.eps_abs,
             eps_rel=self.eps_rel,
@@ -941,7 +944,7 @@ class raPDHG(abc.ABC):
         setup_logger(self.verbose, self.debug)
         # validate(original_problem)
         # config_check(params)
-        self.check_config(original_problem.is_lp)
+        self.check_config()
         qp_cache = cached_quadratic_program_info(
             original_problem, norm_ord=self.optimality_norm
         )

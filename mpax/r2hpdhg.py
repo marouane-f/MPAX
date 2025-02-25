@@ -624,7 +624,7 @@ class r2HPDHG(raPDHG):
         setup_logger(self.verbose, self.debug)
         # validate(original_problem)
         # config_check(params)
-        self.check_config(original_problem.is_lp)
+        self.check_config()
         qp_cache = cached_quadratic_program_info(original_problem, self.optimality_norm)
 
         precondition_start_time = timeit.default_timer()

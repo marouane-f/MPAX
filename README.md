@@ -57,7 +57,7 @@ MPAX implements two state-of-the-art first-order methods:
 * $\boldsymbol{\mathrm{ra}}$**PDHG**: [restarted average Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2311.12180), supporting both LP and QP.
 * $\boldsymbol{\mathrm{r^2}}$**HPDHG**: [reflected restarted Halpern Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2407.16144), supporting LP only.
 
-### Solving a Single LP Problem
+### Solving a Single LP/QP Problem
 MPAX supports both dense and sparse formats for the constraint matrix, controlled by the `use_sparse_matrix` parameter.
 ```python
 from mpax import create_lp, r2HPDHG
@@ -72,9 +72,10 @@ result = solver.optimize(lp)
 # Or create QP
 qp = create_qp(Q, c, A, b, G, h, l, u)
 qp = create_qp(Q, c, A, b, G, h, l, u, use_sparse_matrix=False)
-solver = raPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
+solver = raPDHG(eps_abs=1e-4, eps_rel=1e-4, is_lp=False, verbose=True)
 result = solver.optimize(lp)
 ```
+$\boldsymbol{\mathrm{ra}}$**PDHG** uses different default parameters for solving LPs and QPs. To achieve better performance when solving QPs, set `is_lp=False`.
 
 ### Batch solving
 Batch solving allows you to solve multiple LP problems of the same shape simultaneously by using `jax.vmap`:
