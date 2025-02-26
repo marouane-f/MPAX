@@ -1070,4 +1070,5 @@ class raPDHG(abc.ABC):
             solver_state.termination_status,
             solver_state.num_iterations - 1,
             ci,
+            timing,
         )

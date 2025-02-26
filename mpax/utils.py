@@ -266,6 +266,7 @@ class SaddlePointOutput(NamedTuple):
     relative_dual_residual_norm: float
     absolute_optimality_gap: float
     relative_optimality_gap: float
+    timing_info: dict
 
 
 @chex.dataclass

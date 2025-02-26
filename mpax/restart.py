@@ -30,6 +30,7 @@ def unscaled_saddle_point_output(
     termination_status: TerminationStatus,
     iterations_completed: int,
     convergence_information,
+    timing_info,
 ) -> SaddlePointOutput:
     """
     Return the unscaled primal and dual solutions.
@@ -48,6 +49,8 @@ def unscaled_saddle_point_output(
         Number of iterations completed.
     convergence_information : ConvergenceInformation
         Convergence information.
+    timing_info : dict
+        Timing information.
 
     Returns
     -------
@@ -71,6 +74,7 @@ def unscaled_saddle_point_output(
         relative_dual_residual_norm=convergence_information.relative_dual_residual_norm,
         absolute_optimality_gap=convergence_information.absolute_optimality_gap,
         relative_optimality_gap=convergence_information.relative_optimality_gap,
+        timing_info=timing_info,
     )
 
 
