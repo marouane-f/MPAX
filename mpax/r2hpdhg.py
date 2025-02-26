@@ -26,7 +26,6 @@ from mpax.termination import (
     check_dual_feasibility,
 )
 from mpax.utils import (
-    OptimalityNorm,
     PdhgSolverState,
     QuadraticProgrammingProblem,
     RestartInfo,
@@ -34,6 +33,7 @@ from mpax.utils import (
     RestartToCurrentMetric,
     SaddlePointOutput,
     TerminationStatus,
+    ConvergenceInformation,
 )
 from mpax.feasibility_polishing import (
     set_dual_solution_to_zero,
@@ -41,6 +41,7 @@ from mpax.feasibility_polishing import (
     init_primal_feasibility_polishing,
     init_dual_feasibility_polishing,
 )
+from mpax.iteration_stats_utils import compute_convergence_information
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class r2HPDHG(raPDHG):
     jit: bool = True
     unroll: bool = False
     termination_evaluation_frequency: int = 100
-    optimality_norm: int = OptimalityNorm.L2
+    optimality_norm: float = jnp.inf
     eps_abs: float = 1e-4
     eps_rel: float = 1e-4
     eps_primal_infeasible: float = 1e-8
@@ -83,6 +84,7 @@ class r2HPDHG(raPDHG):
     warm_start: bool = False
     feasibility_polishing: bool = False
     eps_feas_polish: float = 1e-06
+    infeasibility_detection: bool = True
 
     def take_step(
         self, solver_state: PdhgSolverState, problem: QuadraticProgrammingProblem
@@ -147,6 +149,7 @@ class r2HPDHG(raPDHG):
             current_dual_solution=next_dual_solution,
             current_primal_product=next_primal_product,
             current_dual_product=next_dual_product,
+            current_primal_obj_product=jnp.zeros_like(next_primal_solution),
             initial_primal_solution=solver_state.initial_primal_solution,
             initial_dual_solution=solver_state.initial_dual_solution,
             initial_primal_product=solver_state.initial_primal_product,
@@ -155,6 +158,7 @@ class r2HPDHG(raPDHG):
             avg_dual_solution=jnp.zeros_like(next_dual_solution),
             avg_primal_product=jnp.zeros_like(next_primal_product),
             avg_dual_product=jnp.zeros_like(next_dual_product),
+            avg_primal_obj_product=jnp.zeros_like(next_primal_solution),
             solutions_count=new_solutions_count,
             weights_sum=new_weights_sum,
             step_size=step_size,
@@ -202,10 +206,12 @@ class r2HPDHG(raPDHG):
             current_dual_solution=last_iteration_dual_solution,
             current_primal_product=last_iteration_primal_product,
             current_dual_product=last_iteration_dual_product,
+            current_primal_obj_product=jnp.zeros_like(last_iteration_primal_solution),
             avg_primal_solution=solver_state.avg_primal_solution,
             avg_dual_solution=solver_state.avg_dual_solution,
             avg_primal_product=solver_state.avg_primal_product,
             avg_dual_product=solver_state.avg_dual_product,
+            avg_primal_obj_product=jnp.zeros_like(solver_state.avg_primal_solution),
             initial_primal_solution=solver_state.initial_primal_solution,
             initial_dual_solution=solver_state.initial_dual_solution,
             initial_primal_product=solver_state.initial_primal_product,
@@ -250,6 +256,7 @@ class r2HPDHG(raPDHG):
             primal_diff_product=restarted_solver_state.delta_primal_product,
             primal_product=restarted_solver_state.initial_primal_product,
             dual_product=restarted_solver_state.initial_dual_product,
+            primal_obj_product=restarted_solver_state.current_primal_obj_product,
             last_restart_length=restart_length,
             primal_distance_moved_last_restart_period=primal_distance_moved_last_restart_period,
             dual_distance_moved_last_restart_period=dual_distance_moved_last_restart_period,
@@ -281,7 +288,7 @@ class r2HPDHG(raPDHG):
             The quadratic programming problem instance.
         solver_state : PdhgSolverState
             The current solver state.
-        last_restart_info : CuRestartInfo
+        last_restart_info : RestartInfo
             Information from the last restart.
 
         Returns
@@ -320,7 +327,7 @@ class r2HPDHG(raPDHG):
             The quadratic programming problem instance.
         solver_state : PdhgSolverState
             The current solver state.
-        last_restart_info : CuRestartInfo
+        last_restart_info : RestartInfo
             Information from the last restart.
 
         Returns
@@ -395,17 +402,20 @@ class r2HPDHG(raPDHG):
         should_terminate,
         scaled_problem,
         qp_cache,
+        ci,
     ):
         # Check for termination
-        should_terminate, termination_status = check_termination_criteria(
-            scaled_problem,
-            solver_state,
-            self._termination_criteria,
-            qp_cache,
-            solver_state.numerical_error,
-            1.0,
-            self.termination_evaluation_frequency * self.display_frequency,
-            False,
+        should_terminate, termination_status, convergence_information = (
+            check_termination_criteria(
+                scaled_problem,
+                solver_state,
+                self._termination_criteria,
+                qp_cache,
+                solver_state.numerical_error,
+                1.0,
+                self.optimality_norm,
+                False,
+            )
         )
 
         restarted_solver_state, new_last_restart_info = self.run_restart_scheme(
@@ -422,6 +432,7 @@ class r2HPDHG(raPDHG):
             should_terminate,
             scaled_problem,
             qp_cache,
+            convergence_information,
         )
 
     def primal_feasibility_polishing(self, solver_state, scaled_problem, qp_cache):
@@ -496,6 +507,7 @@ class r2HPDHG(raPDHG):
             qp_cache,
             1.0,
             self.termination_evaluation_frequency * self.display_frequency,
+            self.optimality_norm,
             average=False,
         )
         return (
@@ -578,6 +590,7 @@ class r2HPDHG(raPDHG):
             qp_cache,
             1.0,
             self.termination_evaluation_frequency * self.display_frequency,
+            self.optimality_norm,
             average=False,
         )
 
@@ -611,8 +624,8 @@ class r2HPDHG(raPDHG):
         setup_logger(self.verbose, self.debug)
         # validate(original_problem)
         # config_check(params)
-        self.check_config()
-        qp_cache = cached_quadratic_program_info(original_problem)
+        self.check_config(original_problem.is_lp)
+        qp_cache = cached_quadratic_program_info(original_problem, self.optimality_norm)
 
         precondition_start_time = timeit.default_timer()
         scaled_problem = rescale_problem(
@@ -641,10 +654,17 @@ class r2HPDHG(raPDHG):
             jit=self.jit,
         )
 
-        (solver_state, last_restart_info, should_terminate, _, _) = while_loop(
+        (solver_state, last_restart_info, should_terminate, _, _, ci) = while_loop(
             cond_fun=lambda state: state[2] == False,
             body_fun=lambda state: self.main_iteration_update(*state),
-            init_val=(solver_state, last_restart_info, False, scaled_problem, qp_cache),
+            init_val=(
+                solver_state,
+                last_restart_info,
+                False,
+                scaled_problem,
+                qp_cache,
+                ConvergenceInformation(),
+            ),
             maxiter=self.iteration_limit,
             unroll=self.unroll,
             jit=self.jit,
@@ -669,6 +689,7 @@ class r2HPDHG(raPDHG):
                 solver_state.current_primal_product,
                 solver_state.current_dual_solution,
                 solver_state.current_dual_product,
+                solver_state.current_primal_obj_product,
             ) = cond(
                 primal_feasibility & dual_feasibility,
                 lambda: (
@@ -678,13 +699,31 @@ class r2HPDHG(raPDHG):
                     polished_dual_solution,
                     scaled_problem.scaled_qp.constraint_matrix_t
                     @ polished_dual_solution,
+                    scaled_problem.scaled_qp.objective_matrix
+                    @ polished_primal_solution,
                 ),
                 lambda: (
                     solver_state.current_primal_solution,
                     solver_state.current_primal_product,
                     solver_state.current_dual_solution,
                     solver_state.current_dual_product,
+                    solver_state.current_primal_obj_product,
                 ),
+            )
+            ci = compute_convergence_information(
+                scaled_problem.original_qp,
+                qp_cache,
+                solver_state.current_primal_solution
+                / scaled_problem.variable_rescaling,
+                solver_state.current_dual_solution
+                / scaled_problem.constraint_rescaling,
+                self.abs_rel / self.rel_eps,
+                solver_state.current_primal_product
+                * scaled_problem.constraint_rescaling,
+                solver_state.current_dual_product * scaled_problem.variable_rescaling,
+                solver_state.current_primal_obj_product
+                * scaled_problem.variable_rescaling,
+                self.optimality_norm,
             )
         else:
             feasibility_polishing_time = 0
@@ -703,6 +742,7 @@ class r2HPDHG(raPDHG):
             solver_state.num_iterations,
             solver_state.termination_status,
             timing,
+            ci,
         )
         return unscaled_saddle_point_output(
             scaled_problem,
@@ -710,4 +750,6 @@ class r2HPDHG(raPDHG):
             solver_state.current_dual_solution,
             solver_state.termination_status,
             solver_state.num_iterations - 1,
+            ci,
+            timing,
         )

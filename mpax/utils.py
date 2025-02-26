@@ -3,15 +3,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from typing import Dict, List, NamedTuple, Optional, Union
+import functools
+from jax.tree_util import register_dataclass
 
 import chex
 from jax import numpy as jnp
 from jax.experimental.sparse import BCOO, BCSR
-
-
-class OptimalityNorm(IntEnum):
-    L_INF = auto()
-    L2 = auto()
 
 
 class TerminationStatus(IntEnum):
@@ -73,8 +70,6 @@ class TerminationCriteria(NamedTuple):
 
     Attributes
     ----------
-    optimality_norm : OptimalityNorm
-        The norm that we are measuring the optimality criteria in.
     eps_abs : float
         Absolute tolerance on the duality gap, primal feasibility, and dual feasibility.
     eps_rel : float
@@ -89,7 +84,6 @@ class TerminationCriteria(NamedTuple):
         Iteration limit for the solver. Corresponding termination_status = ITERATION_LIMIT.
     """
 
-    optimality_norm: OptimalityNorm = OptimalityNorm.L2
     eps_abs: float = 1.0e-6
     eps_rel: float = 1.0e-6
     eps_primal_infeasible: float = 1.0e-8
@@ -99,10 +93,8 @@ class TerminationCriteria(NamedTuple):
 
 
 class CachedQuadraticProgramInfo(NamedTuple):
-    l_inf_norm_primal_linear_objective: float
-    l_inf_norm_primal_right_hand_side: float
-    l2_norm_primal_linear_objective: float
-    l2_norm_primal_right_hand_side: float
+    primal_linear_objective_norm: float
+    primal_right_hand_side_norm: float
 
 
 @dataclass
@@ -140,7 +132,28 @@ class TwoSidedQpProblem:
     objective_matrix: Union[BCSR, BCOO, jnp.ndarray]
 
 
-@chex.dataclass
+@functools.partial(
+    register_dataclass,
+    data_fields=[
+        "num_variables",
+        "num_constraints",
+        "variable_lower_bound",
+        "variable_upper_bound",
+        "isfinite_variable_lower_bound",
+        "isfinite_variable_upper_bound",
+        "objective_matrix",
+        "objective_vector",
+        "objective_constant",
+        "constraint_matrix",
+        "constraint_matrix_t",
+        "right_hand_side",
+        "num_equalities",
+        "equalities_mask",
+        "inequalities_mask",
+    ],
+    meta_fields=["is_lp"],
+)
+@dataclass
 class QuadraticProgrammingProblem:
     """
     A QuadraticProgrammingProblem specifies a quadratic programming problem
@@ -170,6 +183,12 @@ class QuadraticProgrammingProblem:
         The vector of right-hand side values in the linear constraints.
     num_equalities : int
         The number of equalities in the problem.
+    equalities_mask : jnp.ndarray
+        A boolean mask indicating which constraints are equalities.
+    inequalities_mask : jnp.ndarray
+        A boolean mask indicating which constraints are inequalities.
+    is_lp : bool
+        Indicates whether the problem is a linear program (True) or a quadratic program (False).
     """
 
     num_variables: int
@@ -187,6 +206,7 @@ class QuadraticProgrammingProblem:
     num_equalities: int
     equalities_mask: jnp.ndarray
     inequalities_mask: jnp.ndarray
+    is_lp: bool
 
 
 class PresolveInfo(NamedTuple):
@@ -236,12 +256,40 @@ class SaddlePointOutput(NamedTuple):
         One of the possible values from the TerminationStatus IntEnum.
     iteration_count : int
         The total number of algorithmic iterations for the solve.
+    primal_objective: float
+        The primal objective value.
+    dual_objective: float
+        The dual objective value.
+    corrected_dual_objective: float
+        The corrected dual objective value.
+    primal_residual_norm: float
+        The norm of the primal residual.
+    dual_residual_norm: float
+        The norm of the dual residual.
+    relative_primal_residual_norm: float
+        The relative norm of the primal residual.
+    relative_dual_residual_norm: float
+        The relative norm of the dual residual.
+    absolute_optimality_gap: float
+        The absolute optimality gap.
+    relative_optimality_gap: float
+        The relative optimality gap.
     """
 
     primal_solution: jnp.ndarray
     dual_solution: jnp.ndarray
     termination_status: TerminationStatus
     iteration_count: int
+    primal_objective: float
+    dual_objective: float
+    corrected_dual_objective: float
+    primal_residual_norm: float
+    dual_residual_norm: float
+    relative_primal_residual_norm: float
+    relative_dual_residual_norm: float
+    absolute_optimality_gap: float
+    relative_optimality_gap: float
+    timing_info: dict
 
 
 @chex.dataclass
@@ -276,6 +324,7 @@ class RestartInfo:
     primal_diff_product: Optional[jnp.ndarray] = None  # used in r2HPDHG
     primal_product: Optional[jnp.ndarray] = None  # used in raPDHG
     dual_product: Optional[jnp.ndarray] = None  # used in raPDHG
+    primal_obj_product: Optional[jnp.ndarray] = None
     last_restart_length: int = 1
     primal_distance_moved_last_restart_period: float = 0.0
     dual_distance_moved_last_restart_period: float = 0.0
@@ -440,19 +489,14 @@ class ConvergenceInformation(NamedTuple):
     primal_objective: float = 0.0
     dual_objective: float = 0.0
     corrected_dual_objective: float = float("-inf")
-    l_inf_primal_residual: float = 0.0
-    l2_primal_residual: float = 0.0
-    l_inf_dual_residual: float = 0.0
-    l2_dual_residual: float = 0.0
-    relative_l_inf_primal_residual: float = 0.0
-    relative_l2_primal_residual: float = 0.0
-    relative_l_inf_dual_residual: float = 0.0
-    relative_l2_dual_residual: float = 0.0
+    primal_residual_norm: float = 0.0
+    dual_residual_norm: float = 0.0
+    relative_primal_residual_norm: float = 0.0
+    relative_dual_residual_norm: float = 0.0
+    absolute_optimality_gap: float = 0.0
     relative_optimality_gap: float = 0.0
-    l_inf_primal_variable: float = 0.0
-    l2_primal_variable: float = 0.0
-    l_inf_dual_variable: float = 0.0
-    l2_dual_variable: float = 0.0
+    primal_solution_norm: float = 0.0
+    dual_solution_norm: float = 0.0
 
 
 class InfeasibilityInformation(NamedTuple):
@@ -588,6 +632,7 @@ class PdhgSolverState:
     current_dual_solution: jnp.ndarray
     current_primal_product: jnp.ndarray
     current_dual_product: jnp.ndarray
+    current_primal_obj_product: jnp.ndarray
     solutions_count: int
     step_size: float
     primal_weight: float
@@ -602,6 +647,7 @@ class PdhgSolverState:
     avg_dual_solution: Optional[jnp.ndarray] = None
     avg_primal_product: Optional[jnp.ndarray] = None
     avg_dual_product: Optional[jnp.ndarray] = None
+    avg_primal_obj_product: Optional[jnp.ndarray] = None
     # Initial solutions and delta information are used in r2HPDHG
     initial_primal_solution: Optional[jnp.ndarray] = None
     initial_dual_solution: Optional[jnp.ndarray] = None

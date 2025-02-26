@@ -29,6 +29,8 @@ def unscaled_saddle_point_output(
     dual_solution: jnp.ndarray,
     termination_status: TerminationStatus,
     iterations_completed: int,
+    convergence_information,
+    timing_info,
 ) -> SaddlePointOutput:
     """
     Return the unscaled primal and dual solutions.
@@ -45,6 +47,10 @@ def unscaled_saddle_point_output(
         Reason for termination.
     iterations_completed : int
         Number of iterations completed.
+    convergence_information : ConvergenceInformation
+        Convergence information.
+    timing_info : dict
+        Timing information.
 
     Returns
     -------
@@ -59,6 +65,16 @@ def unscaled_saddle_point_output(
         dual_solution=original_dual_solution,
         termination_status=termination_status,
         iteration_count=iterations_completed,
+        primal_objective=convergence_information.primal_objective,
+        dual_objective=convergence_information.dual_objective,
+        corrected_dual_objective=convergence_information.corrected_dual_objective,
+        primal_residual_norm=convergence_information.primal_residual_norm,
+        dual_residual_norm=convergence_information.dual_residual_norm,
+        relative_primal_residual_norm=convergence_information.relative_primal_residual_norm,
+        relative_dual_residual_norm=convergence_information.relative_dual_residual_norm,
+        absolute_optimality_gap=convergence_information.absolute_optimality_gap,
+        relative_optimality_gap=convergence_information.relative_optimality_gap,
+        timing_info=timing_info,
     )
 
 
@@ -88,7 +104,9 @@ def compute_weight_kkt_residual(
     dual_iterate: jnp.ndarray,
     primal_product: jnp.ndarray,
     dual_product: jnp.ndarray,
+    primal_obj_product: jnp.ndarray,
     primal_weight: float,
+    norm_ord: float,
 ) -> float:
     """
     Compute the weighted KKT residual for restarting based on the current iterate values.
@@ -105,8 +123,12 @@ def compute_weight_kkt_residual(
         Primal product vector.
     dual_product: jnp.ndarray
         Dual product vector.
+    primal_obj_product : jnp.ndarray
+        Primal objective product.
     primal_weight : float
         Weight factor for primal.
+    norm_ord : float
+        Order of the norm.
 
     Returns
     -------
@@ -126,19 +148,22 @@ def compute_weight_kkt_residual(
         jnp.maximum(problem.right_hand_side - primal_product, 0.0),
     )
 
-    primal_objective = problem.objective_constant + jnp.dot(
-        problem.objective_vector, primal_iterate
+    primal_objective = (
+        problem.objective_constant
+        + jnp.dot(problem.objective_vector, primal_iterate)
+        + 0.5 * jnp.dot(primal_iterate, primal_obj_product)
     )
-
-    l2_square_primal_residual = jnp.sum(
-        jnp.square(
-            jnp.concatenate(
-                [
-                    constraint_violation,
-                    lower_variable_violation,
-                    upper_variable_violation,
-                ]
-            )
+    primal_residual_norm = jnp.linalg.norm(
+        jnp.concatenate(
+            [constraint_violation, lower_variable_violation, upper_variable_violation]
+        ),
+        ord=norm_ord,
+    )
+    relative_primal_residual_norm = primal_residual_norm / (
+        1
+        + jnp.maximum(
+            jnp.linalg.norm(problem.right_hand_side, ord=norm_ord),
+            jnp.linalg.norm(primal_product, ord=norm_ord),
         )
     )
 
@@ -152,23 +177,52 @@ def compute_weight_kkt_residual(
         problem.variable_upper_bound,
         reduced_costs,
         problem.right_hand_side,
+        primal_iterate,
         dual_iterate,
+        primal_obj_product,
         problem.objective_constant,
     )
 
     dual_residual = jnp.where(
         problem.inequalities_mask, jnp.maximum(-dual_iterate, 0.0), 0.0
     )
-    l2_square_dual_residual = jnp.sum(
-        jnp.square(jnp.concatenate([dual_residual, reduced_costs_violation]))
+    dual_residual_norm = jnp.linalg.norm(dual_residual, ord=norm_ord)
+    relative_dual_residual_norm = dual_residual_norm / (
+        1
+        + jnp.maximum(
+            jnp.linalg.norm(problem.right_hand_side, ord=norm_ord),
+            jnp.linalg.norm(primal_product, ord=norm_ord),
+        )
     )
-    weighted_kkt_residual = jnp.sqrt(
-        primal_weight * l2_square_primal_residual
-        + (1 / primal_weight) * l2_square_dual_residual
-        + jnp.abs(primal_objective - dual_objective) ** 2
+    absolute_gap = jnp.abs(primal_objective - dual_objective)
+    relative_gap = absolute_gap / (
+        1 + jnp.maximum(jnp.abs(primal_objective), jnp.abs(dual_objective))
     )
-
-    return weighted_kkt_residual
+    weighted_kkt_residual = jnp.linalg.norm(
+        jnp.array(
+            [
+                primal_weight * primal_residual_norm,
+                1 / primal_weight * dual_residual_norm,
+                absolute_gap,
+            ]
+        ),
+        ord=norm_ord,
+    )
+    relative_weighted_kkt_residual = jnp.linalg.norm(
+        jnp.array(
+            [
+                primal_weight * relative_primal_residual_norm,
+                1 / primal_weight * relative_dual_residual_norm,
+                relative_gap,
+            ]
+        ),
+        ord=norm_ord,
+    )
+    return jax.lax.cond(
+        problem.is_lp,
+        lambda: weighted_kkt_residual,
+        lambda: relative_weighted_kkt_residual,
+    )
 
 
 def construct_restart_parameters(
@@ -233,6 +287,7 @@ def should_do_adaptive_restart_kkt(
     restart_params: RestartParameters,
     last_restart_info: RestartInfo,
     primal_weight: float,
+    norm_ord: float,
 ) -> bool:
     """
     Checks if an adaptive restart should be triggered based on KKT residual reduction.
@@ -249,6 +304,8 @@ def should_do_adaptive_restart_kkt(
         Information from the last restart.
     primal_weight : float
         The weight for the primal variable norm.
+    norm_ord : float
+        The order of the norm.
 
     Returns
     -------
@@ -261,7 +318,9 @@ def should_do_adaptive_restart_kkt(
         last_restart_info.dual_solution,
         last_restart_info.primal_product,
         last_restart_info.dual_product,
+        last_restart_info.primal_obj_product,
         primal_weight,
+        norm_ord,
     )
 
     # Stop gradient since kkt_last_residual might be zero.
@@ -379,7 +438,9 @@ def should_do_adaptive_restart_fixed_point(
     return do_restart, reduction_ratio
 
 
-def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart_info):
+def restart_criteria_met_kkt(
+    restart_params, problem, solver_state, last_restart_info, norm_ord
+):
     # Computational expensive!!!
     current_kkt_res = compute_weight_kkt_residual(
         problem,
@@ -387,7 +448,9 @@ def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart
         solver_state.current_dual_solution,
         solver_state.current_primal_product,
         solver_state.current_dual_product,
+        solver_state.current_primal_obj_product,
         solver_state.primal_weight,
+        norm_ord,
     )
     avg_kkt_res = compute_weight_kkt_residual(
         problem,
@@ -395,7 +458,9 @@ def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart
         solver_state.avg_dual_solution,
         solver_state.avg_primal_product,
         solver_state.avg_dual_product,
+        solver_state.avg_primal_obj_product,
         solver_state.primal_weight,
+        norm_ord,
     )
     reset_to_average = jax.lax.cond(
         restart_params.restart_to_current_metric == RestartToCurrentMetric.KKT_GREEDY,
@@ -413,13 +478,14 @@ def restart_criteria_met_kkt(restart_params, problem, solver_state, last_restart
         restart_params,
         last_restart_info,
         solver_state.primal_weight,
+        norm_ord,
     )
     do_restart = jax.lax.cond(
         (
             restart_length
             >= (
                 restart_params.artificial_restart_threshold
-                * (solver_state.num_iterations - 1)
+                * solver_state.num_iterations
             )
         )
         | (
@@ -476,6 +542,7 @@ def perform_restart(
         restarted_dual_solution,
         restarted_primal_product,
         restarted_dual_product,
+        restarted_primal_obj_product,
     ) = jax.lax.cond(
         reset_to_average,
         lambda: (
@@ -483,12 +550,14 @@ def perform_restart(
             solver_state.avg_dual_solution,
             solver_state.avg_primal_product,
             solver_state.avg_dual_product,
+            solver_state.avg_primal_obj_product,
         ),
         lambda: (
             solver_state.current_primal_solution,
             solver_state.current_dual_solution,
             solver_state.current_primal_product,
             solver_state.current_dual_product,
+            solver_state.current_primal_obj_product,
         ),
     )
     if logging.root.level <= logging.DEBUG:
@@ -521,6 +590,7 @@ def perform_restart(
         primal_distance_moved_last_restart_period=primal_distance_moved_last_restart_period,
         dual_distance_moved_last_restart_period=dual_distance_moved_last_restart_period,
         reduction_ratio_last_trial=kkt_reduction_ratio,
+        primal_obj_product=restarted_primal_obj_product,
     )
 
     new_primal_weight = compute_new_primal_weight(
@@ -536,10 +606,12 @@ def perform_restart(
         current_dual_solution=restarted_dual_solution,
         current_primal_product=restarted_primal_product,
         current_dual_product=restarted_dual_product,
+        current_primal_obj_product=restarted_primal_obj_product,
         avg_primal_solution=jnp.zeros_like(restarted_primal_solution),
         avg_dual_solution=jnp.zeros_like(restarted_dual_solution),
         avg_primal_product=jnp.zeros_like(restarted_dual_solution),
         avg_dual_product=jnp.zeros_like(restarted_primal_solution),
+        avg_primal_obj_product=jnp.zeros_like(restarted_primal_solution),
         initial_primal_solution=restarted_primal_solution,
         initial_dual_solution=restarted_dual_solution,
         initial_primal_product=restarted_primal_product,
@@ -565,6 +637,7 @@ def run_restart_scheme(
     solver_state: PdhgSolverState,
     last_restart_info: RestartInfo,
     restart_params: RestartParameters,
+    norm_ord: float,
 ):
     """
     Check restart criteria based on current and average KKT residuals.
@@ -575,10 +648,12 @@ def run_restart_scheme(
         The quadratic programming problem instance.
     solver_state : PdhgSolverState
         The current solver state.
-    last_restart_info : CuRestartInfo
+    last_restart_info : RestartInfo
         Information from the last restart.
     restart_params : RestartParameters
         Parameters for controlling restart behavior.
+    norm_ord : float
+        Order of the norm.
 
     Returns
     -------
@@ -590,7 +665,7 @@ def run_restart_scheme(
         solver_state.solutions_count == 0,
         lambda: (False, False, last_restart_info.reduction_ratio_last_trial),
         lambda: restart_criteria_met_kkt(
-            restart_params, problem, solver_state, last_restart_info
+            restart_params, problem, solver_state, last_restart_info, norm_ord
         ),
     )
     return jax.lax.cond(
@@ -624,7 +699,7 @@ def run_restart_scheme_feasibility_polishing(
         The current solver state, i.e. (x_k, y_k).
     restart_solver_state : PdhgSolverState
         The solver state to check restart criteria, i.e. (x_k, 0) or (0, y_k).
-    last_restart_info : CuRestartInfo
+    last_restart_info : RestartInfo
         Information from the last restart.
     restart_params : RestartParameters
         Parameters for controlling restart behavior.

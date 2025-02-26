@@ -3,3 +3,4 @@ tests_local/
 tmp/
 .vscode
 /experiments
+.pytest_cache

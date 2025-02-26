@@ -49,7 +49,9 @@ def compute_dual_objective(
     variable_upper_bound: jnp.ndarray,
     reduced_costs: jnp.ndarray,
     right_hand_side: jnp.ndarray,
+    primal_solution: jnp.ndarray,
     dual_solution: jnp.ndarray,
+    primal_obj_product: jnp.ndarray,
     objective_constant: float,
 ):
     """Compute the dual objective.
@@ -57,17 +59,21 @@ def compute_dual_objective(
     Parameters
     ----------
     variable_lower_bound : jnp.ndarray
-        the lower bound of variables
+        Lower bound of variables.
     variable_upper_bound : jnp.ndarray
-        the upper bound of variables
+        Upper bound of variables.
     reduced_costs : jnp.ndarray
-        the reduced costs
+        Reduced costs.
     right_hand_side : jnp.ndarray
-        the right hand side of the constraints
+        Right hand side of the constraints.
+    primal_solution : jnp.ndarray
+        Primal solution.
     dual_solution : jnp.ndarray
-        the dual solution
+        Dual solution.
+    primal_obj_product : jnp.ndarray
+        Product of the primal solution and the objective.
     objective_constant : float
-        the constant term in the objective
+        Constant in the objective.
 
     Returns
     -------
@@ -85,7 +91,11 @@ def compute_dual_objective(
             ),
         )
     )
-    base_dual_objective = jnp.dot(right_hand_side, dual_solution) + objective_constant
+    base_dual_objective = (
+        jnp.dot(right_hand_side, dual_solution)
+        + objective_constant
+        - 0.5 * jnp.dot(primal_solution, primal_obj_product)
+    )
     return base_dual_objective + dual_objective_contribution_sum
 
 
@@ -125,10 +135,11 @@ def compute_convergence_information(
     qp_cache: CachedQuadraticProgramInfo,
     primal_iterate: jnp.ndarray,
     dual_iterate: jnp.ndarray,
-    dual_residual: jnp.ndarray,
     eps_ratio: float,
     primal_product: jnp.ndarray,
     dual_product: jnp.ndarray,
+    primal_obj_product: jnp.ndarray,
+    norm_ord: int,
 ) -> ConvergenceInformation:
     """
     Compute convergence information of the given primal and dual solutions.
@@ -166,13 +177,14 @@ def compute_convergence_information(
         Primal product vector.
     dual_product : jnp.ndarray
         Dual product vector.
+    primal_obj_product : jnp.ndarray
+        Primal objective product vector.
 
     Returns
     -------
     ConvergenceInformation
         Computed convergence information.
     """
-
     lower_variable_violation = jnp.maximum(
         problem.variable_lower_bound - primal_iterate, 0.0
     )
@@ -186,21 +198,20 @@ def compute_convergence_information(
         jnp.maximum(problem.right_hand_side - primal_product, 0.0),
     )
 
-    primal_objective = problem.objective_constant + jnp.dot(
-        problem.objective_vector, primal_iterate
+    primal_objective = (
+        problem.objective_constant
+        + jnp.dot(problem.objective_vector, primal_iterate)
+        + 0.5 * jnp.dot(primal_iterate, primal_obj_product)
     )
 
     violation_info = jnp.concatenate(
         [constraint_violation, lower_variable_violation, upper_variable_violation]
     )
-    l_inf_primal_residual = jnp.linalg.norm(violation_info, ord=jnp.inf)
-    l2_primal_residual = jnp.linalg.norm(violation_info, ord=2)
-
-    l_inf_primal_variable = jnp.linalg.norm(primal_iterate, ord=jnp.inf)
-    l2_primal_variable = jnp.linalg.norm(primal_iterate, ord=2)
+    primal_residual_norm = jnp.linalg.norm(violation_info, ord=norm_ord)
+    primal_solution_norm = jnp.linalg.norm(primal_iterate, ord=norm_ord)
 
     reduced_costs, reduced_costs_violation = compute_reduced_costs_from_primal_gradient(
-        problem.objective_vector - dual_product,
+        problem.objective_vector - dual_product + primal_obj_product,
         problem.isfinite_variable_lower_bound,
         problem.isfinite_variable_upper_bound,
     )
@@ -210,59 +221,55 @@ def compute_convergence_information(
         problem.variable_upper_bound,
         reduced_costs,
         problem.right_hand_side,
+        primal_iterate,
         dual_iterate,
+        primal_obj_product,
         problem.objective_constant,
     )
-    l_inf_dual_residual = jnp.linalg.norm(
-        jnp.concatenate([dual_residual, reduced_costs_violation]), ord=jnp.inf
+    dual_residual = jnp.where(
+        problem.inequalities_mask, jnp.maximum(-dual_iterate, 0.0), 0.0
     )
-    l2_dual_residual = jnp.linalg.norm(
-        jnp.concatenate([dual_residual, reduced_costs_violation]), ord=2
+    dual_residual_norm = jnp.linalg.norm(
+        jnp.concatenate([dual_residual, reduced_costs_violation]), ord=norm_ord
     )
-    l_inf_dual_variable = jnp.linalg.norm(dual_iterate, ord=jnp.inf)
-    l2_dual_variable = jnp.linalg.norm(dual_iterate, ord=2)
-
-    # Compute the relative information.
-    relative_l_inf_primal_residual = l_inf_primal_residual / (
-        eps_ratio + qp_cache.l_inf_norm_primal_right_hand_side
+    dual_solution_norm = jnp.linalg.norm(dual_iterate, ord=norm_ord)
+    relative_primal_residual_norm = primal_residual_norm / (
+        eps_ratio
+        + jnp.maximum(
+            qp_cache.primal_right_hand_side_norm,
+            jnp.linalg.norm(primal_product, ord=norm_ord),
+        )
     )
-    relative_l2_primal_residual = l2_primal_residual / (
-        eps_ratio + qp_cache.l2_norm_primal_right_hand_side
-    )
-    relative_l_inf_dual_residual = l_inf_dual_residual / (
-        eps_ratio + qp_cache.l_inf_norm_primal_linear_objective
-    )
-    relative_l2_dual_residual = l2_dual_residual / (
-        eps_ratio + qp_cache.l2_norm_primal_linear_objective
+    relative_dual_residual_norm = dual_residual_norm / (
+        eps_ratio
+        + jnp.maximum(
+            jnp.maximum(
+                qp_cache.primal_linear_objective_norm,
+                jnp.linalg.norm(primal_obj_product, ord=norm_ord),
+            ),
+            jnp.linalg.norm(dual_product, ord=norm_ord),
+        )
     )
     corrected_dual_obj_value = jax.lax.cond(
-        l_inf_dual_residual == 0.0,
-        lambda _: dual_objective,
-        lambda _: -jnp.inf,
-        operand=None,
+        dual_residual_norm == 0.0, lambda: dual_objective, lambda: -jnp.inf
     )
-    gap = jnp.abs(primal_objective - dual_objective)
-    abs_obj = jnp.abs(primal_objective) + jnp.abs(dual_objective)
-    relative_optimality_gap = gap / (eps_ratio + abs_obj)
-
+    absolute_optimality_gap = jnp.abs(primal_objective - dual_objective)
+    relative_optimality_gap = absolute_optimality_gap / (
+        eps_ratio + jnp.maximum(abs(primal_objective), abs(dual_objective))
+    )
     return ConvergenceInformation(
         PointType.POINT_TYPE_AVERAGE_ITERATE,
         primal_objective,
         dual_objective,
         corrected_dual_obj_value,
-        l_inf_primal_residual,
-        l2_primal_residual,
-        l_inf_dual_residual,
-        l2_dual_residual,
-        relative_l_inf_primal_residual,
-        relative_l2_primal_residual,
-        relative_l_inf_dual_residual,
-        relative_l2_dual_residual,
+        primal_residual_norm,
+        dual_residual_norm,
+        relative_primal_residual_norm,
+        relative_dual_residual_norm,
+        absolute_optimality_gap,
         relative_optimality_gap,
-        l_inf_primal_variable,
-        l2_primal_variable,
-        l_inf_dual_variable,
-        l2_dual_variable,
+        primal_solution_norm,
+        dual_solution_norm,
     )
 
 
@@ -270,9 +277,9 @@ def compute_infeasibility_information(
     problem: QuadraticProgrammingProblem,
     primal_ray_estimate: jnp.ndarray,
     dual_ray_estimate: jnp.ndarray,
-    dual_residual: jnp.ndarray,
     primal_ray_estimate_product: jnp.ndarray,
     dual_ray_estimate_product: jnp.ndarray,
+    primal_ray_estimate_obj_product: jnp.ndarray,
 ):
     """
     Compute infeasibility information of the given primal and dual solutions.
@@ -289,6 +296,8 @@ def compute_infeasibility_information(
         Primal ray estimate product vector.
     dual_ray_estimate_product : jnp.ndarray
         Dual ray estimate product vector.
+    primal_ray_estimate_obj_product : jnp.ndarray
+        Primal ray estimate objective product vector.
 
     Returns
     -------
@@ -326,18 +335,12 @@ def compute_infeasibility_information(
         ),
     )
 
-    primal_objective = problem.objective_constant + jnp.dot(
-        problem.objective_vector, scaled_primal_ray_estimate
-    )
-
     max_primal_ray_infeasibility = jnp.linalg.norm(
         jnp.concatenate(
             [constraint_violation, lower_variable_violation, upper_variable_violation]
         ),
         ord=jnp.inf,
     )
-    # Question: do we need to add objective_constant here?
-    # Answer: No, we only need the direction here.
     primal_ray_linear_objective = jnp.dot(
         problem.objective_vector, scaled_primal_ray_estimate
     )
@@ -351,30 +354,26 @@ def compute_infeasibility_information(
         problem.variable_upper_bound,
         reduced_costs,
         problem.right_hand_side,
+        primal_ray_estimate,
         dual_ray_estimate,
+        primal_ray_estimate_obj_product,
         problem.objective_constant,
     )
-
+    dual_residual = jnp.where(
+        problem.inequalities_mask, jnp.maximum(-dual_ray_estimate, 0.0), 0.0
+    )
     l_inf_dual_residual = jnp.linalg.norm(
         jnp.concatenate([dual_residual, reduced_costs_violation]), ord=jnp.inf
     )
 
-    l2_dual_residual = jnp.linalg.norm(
-        jnp.concatenate([dual_residual, reduced_costs_violation]), ord=2
-    )
-
-    scaling_factor = jax.lax.max(
+    scaling_factor = jnp.maximum(
         jnp.linalg.norm(scaled_primal_ray_estimate, ord=jnp.inf),
         jnp.linalg.norm(reduced_costs, ord=jnp.inf),
     )
     max_dual_ray_infeasibility, dual_ray_objective = jax.lax.cond(
         scaling_factor == 0.0,
-        lambda _: (0.0, 0.0),
-        lambda _: (
-            l_inf_dual_residual / scaling_factor,
-            dual_objective / scaling_factor,
-        ),
-        operand=None,
+        lambda: (0.0, 0.0),
+        lambda: (l_inf_dual_residual / scaling_factor, dual_objective / scaling_factor),
     )
 
     return InfeasibilityInformation(
@@ -392,8 +391,9 @@ def evaluate_unscaled_iteration_stats(
     solver_state: PdhgSolverState,
     cumulative_time: float,
     eps_ratio: float,
-    display_frequency: int,
+    norm_ord: float,
     average: bool = True,
+    infeasibility_detection: bool = True,
 ):
     """
     Compute the iteration stats of the unscaled primal and dual solutions.
@@ -410,10 +410,12 @@ def evaluate_unscaled_iteration_stats(
         Cumulative time in seconds.
     eps_ratio : float
         eps_abs / eps_rel
-    display_frequency : int
-        Frequency to display the iteration stats.
+    norm_ord : float
+        Order of the norm.
     average : bool
         Whether to use the average solution.
+    infeasibility_detection : bool
+        Whether to detect infeasibility.
 
     Returns
     -------
@@ -425,6 +427,7 @@ def evaluate_unscaled_iteration_stats(
         unscaled_dual_solution,
         unscaled_primal_product,
         unscaled_dual_product,
+        unscaled_primal_obj_product,
     ) = jax.lax.cond(
         average == True,
         lambda: (
@@ -432,36 +435,41 @@ def evaluate_unscaled_iteration_stats(
             solver_state.avg_dual_solution / scaled_problem.constraint_rescaling,
             solver_state.avg_primal_product * scaled_problem.constraint_rescaling,
             solver_state.avg_dual_product * scaled_problem.variable_rescaling,
+            solver_state.avg_primal_obj_product * scaled_problem.variable_rescaling,
         ),
         lambda: (
             solver_state.current_primal_solution / scaled_problem.variable_rescaling,
             solver_state.current_dual_solution / scaled_problem.constraint_rescaling,
             solver_state.current_primal_product * scaled_problem.constraint_rescaling,
             solver_state.current_dual_product * scaled_problem.variable_rescaling,
+            solver_state.current_primal_obj_product * scaled_problem.variable_rescaling,
         ),
-    )
-    unscaled_dual_residual = jnp.where(
-        scaled_problem.original_qp.inequalities_mask,
-        jnp.maximum(-unscaled_dual_solution, 0.0),
-        0.0,
     )
     convergence_information = compute_convergence_information(
         scaled_problem.original_qp,
         qp_cache,
         unscaled_primal_solution,
         unscaled_dual_solution,
-        unscaled_dual_residual,
         eps_ratio,
         unscaled_primal_product,
         unscaled_dual_product,
+        unscaled_primal_obj_product,
+        norm_ord,
     )
-    infeasibility_information = compute_infeasibility_information(
-        scaled_problem.original_qp,
-        unscaled_primal_solution,
-        unscaled_dual_solution,
-        unscaled_dual_residual,
-        unscaled_primal_product,
-        unscaled_dual_product,
+    # TODO: improve the cond for vmap
+    infeasibility_information = jax.lax.cond(
+        infeasibility_detection,
+        lambda: compute_infeasibility_information(
+            scaled_problem.original_qp,
+            unscaled_primal_solution,
+            unscaled_dual_solution,
+            unscaled_primal_product,
+            unscaled_dual_product,
+            unscaled_primal_obj_product,
+        ),
+        lambda: InfeasibilityInformation(
+            PointType.POINT_TYPE_AVERAGE_ITERATE, 1.0, 1.0, 1.0, 1.0
+        ),
     )
     current_iteration_stats = IterationStats(
         iteration_number=solver_state.num_iterations,

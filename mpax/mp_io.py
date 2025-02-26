@@ -301,11 +301,83 @@ def create_lp(c, A, b, G, h, l, u, use_sparse_matrix=True):
         inequalities_mask=jnp.concatenate(
             [jnp.full(len(b), False), jnp.full(len(h), True)]
         ),
+        is_lp=True,
     )
     return problem
 
 
-def create_lp_from_gurobi(
+def create_qp(Q, c, A, b, G, h, l, u, use_sparse_matrix=True):
+    """Create a boxed linear program from arrays.
+            max  cx
+            s.t. Ax = b
+                 Gx >= h
+                 l <= x <= u
+
+    Parameters
+    ----------
+    Q : jnp.ndarray, BCOO or BCSR
+        The matrix of the quadratic term.
+    c : jnp.ndarray
+        The objective vector.
+    A : jnp.ndarray, BCOO or BCSR
+        The matrix of equality constraints.
+    b : jnp.ndarray
+        The right hand side of equality constraints.
+    G : jnp.ndarray, BCOO or BCSR
+        The matrix for inequality constraints.
+    b : jnp.ndarray
+        The right hand side of inequality constraints.
+    l : jnp.ndarray
+        The lower bound of the variables.
+    u : jnp.ndarray
+        The upper bound of the variables.
+    use_sparse_matrix: bool
+        Whether to use sparse matrix format, by default True.
+
+    Returns
+    -------
+    QuadraticProgrammingProblem
+        The boxed linear program.
+    """
+    if use_sparse_matrix:
+        constraint_matrix = bcoo_concatenate(
+            [transform_to_bcoo(A), transform_to_bcoo(G)], dimension=0
+        )
+        objective_matrix = transform_to_bcoo(Q)
+        is_lp = objective_matrix.nse == 0
+    else:
+        constraint_matrix = jnp.concatenate(
+            [transform_to_jnp_array(A), transform_to_jnp_array(G)], axis=0
+        )
+        objective_matrix = transform_to_jnp_array(Q)
+        is_lp = jnp.all(objective_matrix == 0)
+
+    problem = QuadraticProgrammingProblem(
+        num_variables=c.shape[0],
+        num_constraints=A.shape[0] + G.shape[0],
+        variable_lower_bound=jnp.array(l),
+        variable_upper_bound=jnp.array(u),
+        isfinite_variable_lower_bound=jnp.isfinite(l),
+        isfinite_variable_upper_bound=jnp.isfinite(u),
+        objective_matrix=objective_matrix,
+        objective_vector=jnp.array(c),
+        objective_constant=0.0,
+        constraint_matrix=constraint_matrix,
+        constraint_matrix_t=constraint_matrix.T,
+        right_hand_side=jnp.concatenate([b, h]),
+        num_equalities=b.shape[0],
+        equalities_mask=jnp.concatenate(
+            [jnp.full(len(b), True), jnp.full(len(h), False)]
+        ),
+        inequalities_mask=jnp.concatenate(
+            [jnp.full(len(b), False), jnp.full(len(h), True)]
+        ),
+        is_lp=is_lp,
+    )
+    return problem
+
+
+def create_qp_from_gurobi(
     model, use_sparse_matrix=True, sharding=None
 ) -> QuadraticProgrammingProblem:
     """Transforms a gurobi model to a standard form.
@@ -339,12 +411,14 @@ def create_lp_from_gurobi(
         constraint_matrix.data = jnp.where(
             leq_nzval_mask, -constraint_matrix.data, constraint_matrix.data
         )
+        objective_matrix = 2 * BCOO.from_scipy_sparse(model.getQ())
     else:
         constraint_matrix = jnp.array(model.getA().toarray())
         constraint_matrix = constraint_matrix.at[leq_mask].set(
             -constraint_matrix[leq_mask]
         )
-
+        objective_matrix = 2 * jnp.array(model.getQ().toarray())
+    is_lp = model.getQ().nnz == 0
     if sharding is not None:
         constraint_matrix = jax.device_put(constraint_matrix, sharding)
 
@@ -352,7 +426,7 @@ def create_lp_from_gurobi(
     var_ub = jnp.array(model.getAttr("UB", model.getVars()))
 
     objective_vector = jnp.array(model.getAttr("Obj", model.getVars()))
-    objective_constant = model.getObjective().getConstant()
+    objective_constant = model.ObjCon
 
     problem = QuadraticProgrammingProblem(
         num_variables=len(var_lb),
@@ -361,9 +435,7 @@ def create_lp_from_gurobi(
         variable_upper_bound=var_ub,
         isfinite_variable_lower_bound=jnp.isfinite(var_lb),
         isfinite_variable_upper_bound=jnp.isfinite(var_ub),
-        objective_matrix=empty(
-            shape=(len(var_lb), len(var_lb)), dtype=float, sparse_format="bcoo"
-        ),
+        objective_matrix=objective_matrix,
         objective_vector=objective_vector,
         objective_constant=objective_constant,
         constraint_matrix=constraint_matrix,
@@ -372,5 +444,6 @@ def create_lp_from_gurobi(
         num_equalities=jnp.sum(equalities_mask),
         equalities_mask=equalities_mask,
         inequalities_mask=~equalities_mask,
+        is_lp=is_lp,
     )
     return problem

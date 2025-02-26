@@ -4,6 +4,11 @@
 
 # MPAX: Mathematical Programming in JAX
 
+[![pypi](https://img.shields.io/pypi/v/mpax.svg?color=brightgreen)](https://pypi.org/pypi/mpax/)
+![CI status](https://github.com/MIT-Lu-Lab/MPAX/actions/workflows/test.yml/badge.svg?branch=main)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/MIT-Lu-Lab/MPAX/blob/main/LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2412.09734-B31B1B.svg)](https://arxiv.org/abs/2412.09734)
+
 MPAX is a hardware-accelerated, differentiable, batchable, and distributable solver for mathematical programming in JAX, designed to integrate with modern computational and deep learning workflows:
 
 - **Hardware accelerated**: executes on multiple architectures including CPUs, GPUs and TPUs.
@@ -13,7 +18,7 @@ MPAX is a hardware-accelerated, differentiable, batchable, and distributable sol
 
 MPAX's primary motivation is to integrate mathematical programming with deep learning pipelines. To achieve this, MPAX aligns its algorithms and implementations with the requirements of deep learning hardware, ensuring compatibility with GPUs and TPUs. By being differentiable, MPAX can integrate directly into the backpropagation process of neural network training. Its batchability and distributability further enable scalable deployment in large-scale applications. 
 
-In this initial release, MPAX supports linear programming (LP), the foundational problem in mathematical programming. Future releases will expand support to include other problem classes of mathematical programming.
+Currently, MPAX supports **linear programming (LP)** and **quadratic programming (QP)**, the foundational problems in mathematical programming. Future releases will expand support to include other problem classes of mathematical programming.
 
 ## Installation
 
@@ -28,32 +33,47 @@ pip install git+https://github.com/MIT-Lu-Lab/mpax.git
 
 ## Quickstart
 
-Currently, MPAX focuses on solving linear programming (LP) problems of the following form:
+Currently, MPAX focuses on solving linear programming (LP) and quadratic programming (QP) problems of the following form:
+
 ```math
 \begin{aligned}
+\tag{LP}
 \min_{l \leq x \leq u}\ & c^\top x \\
 \text{s.t.}\ & A x = b \\
 & Gx \geq h
 \end{aligned}
 ```
 
-MPAX implements two state-of-the-art first-order methods for solving LP problems:
-* $\boldsymbol{\mathrm{ra}}$**PDHG**: [restarted average Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2311.12180).
-* $\boldsymbol{\mathrm{r^2}}$**HPDHG**: [reflected restarted Halpern Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2407.16144).
+```math
+\begin{aligned}
+\tag{QP}
+\min_{l \leq x \leq u}\ & \frac{1}{2} x^\top Q x + c^\top x \\
+\text{s.t.}\ & A x = b \\
+& Gx \geq h
+\end{aligned}
+```
 
-### Solving a Single LP Problem
+MPAX implements two state-of-the-art first-order methods:
+* $\boldsymbol{\mathrm{ra}}$**PDHG**: restarted average Primal-Dual Hybrid Gradient, supporting both LP ([paper](https://arxiv.org/abs/2311.12180)) and QP ([paper](https://arxiv.org/abs/2311.07710)). 
+* $\boldsymbol{\mathrm{r^2}}$**HPDHG**: reflected restarted Halpern Primal-Dual Hybrid Gradient, supporting LP only ([paper](https://arxiv.org/abs/2407.16144)).
+
+### Solving a Single LP/QP Problem
 MPAX supports both dense and sparse formats for the constraint matrix, controlled by the `use_sparse_matrix` parameter.
 ```python
 from mpax import create_lp, r2HPDHG
 
 # Create LP using sparse matrix format (default)
 lp = create_lp(c, A, b, G, h, l, u) # use_sparse_matrix=True by default
-
 # Create LP using dense matrix format
 lp = create_lp(c, A, b, G, h, l, u, use_sparse_matrix=False)
-
 solver = r2HPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
-result = solver.optimize(lp) # jittable
+result = solver.optimize(lp)
+
+# Or create QP
+qp = create_qp(Q, c, A, b, G, h, l, u)
+qp = create_qp(Q, c, A, b, G, h, l, u, use_sparse_matrix=False)
+solver = raPDHG(eps_abs=1e-4, eps_rel=1e-4, verbose=True)
+result = solver.optimize(lp)
 ```
 
 ### Batch solving

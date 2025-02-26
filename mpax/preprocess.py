@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from typing import List, Tuple, Union
 
 import jax.numpy as jnp
@@ -487,8 +488,10 @@ def l2_norm_rescaling(
     """
     # Calculate L2 norms of rows and columns
     norm_of_rows = get_row_l2_norms(problem.constraint_matrix)
-    norm_of_columns = get_col_l2_norms(problem.constraint_matrix)
-
+    norm_of_columns = jnp.sqrt(
+        jnp.square(get_col_l2_norms(problem.constraint_matrix))
+        + jnp.square(get_col_l2_norms(problem.objective_matrix))
+    )
     # Avoid division by zero by setting norms to 1 where they are 0
     norm_of_rows = jnp.where(norm_of_rows == 0, 1.0, norm_of_rows)
     norm_of_columns = jnp.where(norm_of_columns == 0, 1.0, norm_of_columns)
@@ -547,9 +550,7 @@ def rescale_problem(
     else:
         raise ValueError("Unsupported matrix format.")
 
-    problem = QuadraticProgrammingProblem(
-        **original_problem.__dict__
-    )  # Deepcopy-like functionality
+    problem = deepcopy(original_problem)
 
     num_constraints, num_variables = problem.constraint_matrix.shape
     constraint_rescaling = jnp.ones(num_constraints)
@@ -801,25 +802,33 @@ def pock_chambolle_rescaling(
     assert 0 <= alpha <= 2
 
     constraint_matrix = qp.constraint_matrix
+    objective_matrix = qp.objective_matrix
     if isinstance(qp.constraint_matrix, jnp.ndarray):
         variable_rescaling = jnp.sqrt(
             jnp.sum(jnp.abs(constraint_matrix) ** (2 - alpha), axis=0)
+            + jnp.sum(jnp.abs(objective_matrix) ** (2 - alpha), axis=0)
         )
         constraint_rescaling = jnp.sqrt(
             jnp.sum(jnp.abs(constraint_matrix) ** (2 - alpha), axis=1)
         )
     elif isinstance(qp.constraint_matrix, BCOO):
-        row_indices, col_indices = constraint_matrix.indices.T
+        # TODO: improve the code here, instead of using jnp.bincount.
+        # Use BCOO.sum or use the sparsify() transform.
         variable_rescaling = jnp.sqrt(
             jnp.bincount(
-                col_indices,
+                constraint_matrix.indices[:, 1],
                 weights=jnp.abs(constraint_matrix.data) ** (2 - alpha),
                 length=constraint_matrix.shape[1],
+            )
+            + jnp.bincount(
+                objective_matrix.indices[:, 1],
+                weights=jnp.abs(objective_matrix.data) ** (2 - alpha),
+                length=objective_matrix.shape[1],
             )
         )
         constraint_rescaling = jnp.sqrt(
             jnp.bincount(
-                row_indices,
+                constraint_matrix.indices[:, 0],
                 weights=jnp.abs(constraint_matrix.data) ** (alpha),
                 length=constraint_matrix.shape[0],
             )
