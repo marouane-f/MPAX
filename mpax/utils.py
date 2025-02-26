@@ -151,9 +151,7 @@ class TwoSidedQpProblem:
         "equalities_mask",
         "inequalities_mask",
     ],
-    meta_fields=[
-        "is_lp",
-    ],
+    meta_fields=["is_lp"],
 )
 @dataclass
 class QuadraticProgrammingProblem:
