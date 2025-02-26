@@ -454,15 +454,15 @@ def pdhg_final_log(
             level=logging.INFO,
         )
         jax_debug_log(
-            "- Primal objective: {:.10e}\n"
-            "- Dual objective: {:.10e}\n"
-            "- Corrected dual objective: {:.10e}\n"
-            "- Abs gap: {:.5e}\n"
-            "- Rel gap: {:.5e}\n"
-            "- Abs Primal residual: {:.5e}\n"
-            "- Abs Dual residual: {:.5e}\n"
-            "- Rel primal residual: {:.5e}\n"
-            "- Rel dual residual: {:.5e}",
+            " - Primal objective: {:.10e}\n"
+            " - Dual objective: {:.10e}\n"
+            " - Corrected dual objective: {:.10e}\n"
+            " - Abs gap: {:.5e}\n"
+            " - Rel gap: {:.5e}\n"
+            " - Abs Primal residual: {:.5e}\n"
+            " - Abs Dual residual: {:.5e}\n"
+            " - Rel primal residual: {:.5e}\n"
+            " - Rel dual residual: {:.5e}",
             convergence_information.primal_objective,
             convergence_information.dual_objective,
             convergence_information.corrected_dual_objective,
