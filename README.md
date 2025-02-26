@@ -36,21 +36,25 @@ pip install git+https://github.com/MIT-Lu-Lab/mpax.git
 Currently, MPAX focuses on solving linear programming (LP) and quadratic programming (QP) problems of the following form:
 
 ```math
-\begin{aligned}
+\begin{equation}
 \tag{LP}
+\begin{aligned}
 \min_{l \leq x \leq u}\ & c^\top x \\
 \text{s.t.}\ & A x = b \\
 & Gx \geq h
 \end{aligned}
+\end{equation}
 ```
 
 ```math
-\begin{aligned}
+\begin{equation}
 \tag{QP}
+\begin{aligned}
 \min_{l \leq x \leq u}\ & \frac{1}{2} x^\top Q x + c^\top x \\
 \text{s.t.}\ & A x = b \\
 & Gx \geq h
 \end{aligned}
+\end{equation}
 ```
 
 MPAX implements two state-of-the-art first-order methods:
