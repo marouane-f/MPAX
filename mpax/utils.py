@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from typing import Dict, List, NamedTuple, Optional, Union
+import functools
+from jax.tree_util import register_dataclass
 
 import chex
 from jax import numpy as jnp
@@ -130,7 +132,30 @@ class TwoSidedQpProblem:
     objective_matrix: Union[BCSR, BCOO, jnp.ndarray]
 
 
-@chex.dataclass
+@functools.partial(
+    register_dataclass,
+    data_fields=[
+        "num_variables",
+        "num_constraints",
+        "variable_lower_bound",
+        "variable_upper_bound",
+        "isfinite_variable_lower_bound",
+        "isfinite_variable_upper_bound",
+        "objective_matrix",
+        "objective_vector",
+        "objective_constant",
+        "constraint_matrix",
+        "constraint_matrix_t",
+        "right_hand_side",
+        "num_equalities",
+        "equalities_mask",
+        "inequalities_mask",
+    ],
+    meta_fields=[
+        "is_lp",
+    ],
+)
+@dataclass
 class QuadraticProgrammingProblem:
     """
     A QuadraticProgrammingProblem specifies a quadratic programming problem

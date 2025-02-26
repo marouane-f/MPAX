@@ -40,7 +40,7 @@ def test_rapdhg_qp():
     for model_filename, expected_obj in qp_model_objs.items():
         gurobi_model = gp.read(pytest_cache_dir + "/" + model_filename)
         qp = create_qp_from_gurobi(gurobi_model)
-        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6, is_lp=False)
+        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6)
         result = solver.optimize(qp)
 
         assert pytest.approx(result.primal_objective, rel=1e-2) == expected_obj
@@ -63,7 +63,7 @@ def test_rapdhg_qp_with_jit():
     for model_filename, expected_obj in qp_model_objs.items():
         gurobi_model = gp.read(pytest_cache_dir + "/" + model_filename)
         qp = create_qp_from_gurobi(gurobi_model)
-        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6, is_lp=False)
+        solver = raPDHG(eps_abs=1e-6, eps_rel=1e-6)
         jit_optimize = jit(solver.optimize)
         result = jit_optimize(qp)
 

@@ -624,7 +624,7 @@ class r2HPDHG(raPDHG):
         setup_logger(self.verbose, self.debug)
         # validate(original_problem)
         # config_check(params)
-        self.check_config()
+        self.check_config(original_problem.is_lp)
         qp_cache = cached_quadratic_program_info(original_problem, self.optimality_norm)
 
         precondition_start_time = timeit.default_timer()
@@ -751,4 +751,5 @@ class r2HPDHG(raPDHG):
             solver_state.termination_status,
             solver_state.num_iterations - 1,
             ci,
+            timing,
         )
