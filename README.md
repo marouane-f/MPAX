@@ -36,26 +36,30 @@ pip install git+https://github.com/MIT-Lu-Lab/mpax.git
 Currently, MPAX focuses on solving linear programming (LP) and quadratic programming (QP) problems of the following form:
 
 ```math
-\begin{aligned}
+\begin{equation}
 \tag{LP}
+\begin{aligned}
 \min_{l \leq x \leq u}\ & c^\top x \\
 \text{s.t.}\ & A x = b \\
 & Gx \geq h
 \end{aligned}
+\end{equation}
 ```
 
 ```math
-\begin{aligned}
+\begin{equation}
 \tag{QP}
+\begin{aligned}
 \min_{l \leq x \leq u}\ & \frac{1}{2} x^\top Q x + c^\top x \\
 \text{s.t.}\ & A x = b \\
 & Gx \geq h
 \end{aligned}
+\end{equation}
 ```
 
 MPAX implements two state-of-the-art first-order methods:
-* $\boldsymbol{\mathrm{ra}}$**PDHG**: restarted average Primal-Dual Hybrid Gradient, supporting both LP ([paper](https://arxiv.org/abs/2311.12180)) and QP ([paper](https://arxiv.org/abs/2311.07710)). 
-* $\boldsymbol{\mathrm{r^2}}$**HPDHG**: reflected restarted Halpern Primal-Dual Hybrid Gradient, supporting LP only ([paper](https://arxiv.org/abs/2407.16144)).
+* $\boldsymbol{\mathrm{ra}}$**PDHG**: **restarted average Primal-Dual Hybrid Gradient**, supporting both LP ([paper](https://arxiv.org/abs/2311.12180)) and QP ([paper](https://arxiv.org/abs/2311.07710)). 
+* $\boldsymbol{\mathrm{r^2}}$**HPDHG**: **reflected restarted Halpern Primal-Dual Hybrid Gradient**, supporting LP only ([paper](https://arxiv.org/abs/2407.16144)).
 
 ### Solving a Single LP/QP Problem
 MPAX supports both dense and sparse formats for the constraint matrix, controlled by the `use_sparse_matrix` parameter.
