@@ -58,8 +58,8 @@ Currently, MPAX focuses on solving linear programming (LP) and quadratic program
 ```
 
 MPAX implements two state-of-the-art first-order methods:
-* $\boldsymbol{\mathrm{ra}}$**PDHG**: restarted average Primal-Dual Hybrid Gradient, supporting both LP ([paper](https://arxiv.org/abs/2311.12180)) and QP ([paper](https://arxiv.org/abs/2311.07710)). 
-* $\boldsymbol{\mathrm{r^2}}$**HPDHG**: reflected restarted Halpern Primal-Dual Hybrid Gradient, supporting LP only ([paper](https://arxiv.org/abs/2407.16144)).
+* $\boldsymbol{\mathrm{ra}}$**PDHG**: **restarted average Primal-Dual Hybrid Gradient**, supporting both LP ([paper](https://arxiv.org/abs/2311.12180)) and QP ([paper](https://arxiv.org/abs/2311.07710)). 
+* $\boldsymbol{\mathrm{r^2}}$**HPDHG**: **reflected restarted Halpern Primal-Dual Hybrid Gradient**, supporting LP only ([paper](https://arxiv.org/abs/2407.16144)).
 
 ### Solving a Single LP/QP Problem
 MPAX supports both dense and sparse formats for the constraint matrix, controlled by the `use_sparse_matrix` parameter.
