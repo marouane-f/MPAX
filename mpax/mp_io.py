@@ -411,13 +411,17 @@ def create_qp_from_gurobi(
         constraint_matrix.data = jnp.where(
             leq_nzval_mask, -constraint_matrix.data, constraint_matrix.data
         )
-        objective_matrix = 2 * BCOO.from_scipy_sparse(model.getQ())
+        objective_matrix = 2 * BCOO.from_scipy_sparse(
+            (model.getQ() + model.getQ().T) / 2
+        )
     else:
         constraint_matrix = jnp.array(model.getA().toarray())
         constraint_matrix = constraint_matrix.at[leq_mask].set(
             -constraint_matrix[leq_mask]
         )
-        objective_matrix = 2 * jnp.array(model.getQ().toarray())
+        objective_matrix = 2 * jnp.array(
+            ((model.getQ() + model.getQ().T) / 2).toarray()
+        )
     is_lp = model.getQ().nnz == 0
     if sharding is not None:
         constraint_matrix = jax.device_put(constraint_matrix, sharding)
