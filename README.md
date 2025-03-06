@@ -64,7 +64,7 @@ MPAX implements two state-of-the-art first-order methods:
 ### Solving a Single LP/QP Problem
 MPAX supports both dense and sparse formats for the constraint matrix, controlled by the `use_sparse_matrix` parameter.
 ```python
-from mpax import create_lp, r2HPDHG
+from mpax import create_lp, create_qp, raPDHG, r2HPDHG
 
 # Create LP using sparse matrix format (default)
 lp = create_lp(c, A, b, G, h, l, u) # use_sparse_matrix=True by default
