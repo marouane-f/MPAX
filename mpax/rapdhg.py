@@ -82,6 +82,8 @@ def estimate_maximum_singular_value(
         matrix_transpose = BCSR.from_bcoo(matrix.to_bcoo().T)
     elif isinstance(matrix, BCOO):
         matrix_transpose = BCSR.from_bcoo(matrix.T)
+    elif isinstance(matrix, jnp.ndarray):
+        matrix_transpose = matrix.T
     number_of_power_iterations = 0
 
     def cond_fun(state):
@@ -401,6 +403,7 @@ class raPDHG(abc.ABC):
         scaled_problem: ScaledQpProblem,
         initial_primal_solution: jnp.array,
         initial_dual_solution: jnp.array,
+        is_lp: bool = True,
     ) -> PdhgSolverState:
         """Initialize the solver status for PDHG.
 
@@ -451,9 +454,11 @@ class raPDHG(abc.ABC):
             self._norm_A = estimate_maximum_singular_value(scaled_qp.constraint_matrix)[
                 0
             ]
-            self._norm_Q = estimate_maximum_singular_value(scaled_qp.objective_matrix)[
-                0
-            ]
+            self._norm_Q = jax.lax.cond(
+                is_lp,
+                lambda: 0.0,
+                lambda: estimate_maximum_singular_value(scaled_qp.objective_matrix)[0],
+            )
             step_size = 1.0  # Placeholder for step size.
 
         if self.warm_start:
@@ -551,10 +556,14 @@ class raPDHG(abc.ABC):
             extrapolation_coefficient = solver_state.solutions_count / (
                 solver_state.solutions_count + 1.0
             )
-            step_size = self.calculate_constant_step_size(
-                solver_state.primal_weight,
-                solver_state.solutions_count,
-                solver_state.step_size,
+            step_size = jax.lax.cond(
+                problem.is_lp,
+                lambda: solver_state.step_size,
+                lambda: self.calculate_constant_step_size(
+                    solver_state.primal_weight,
+                    solver_state.solutions_count,
+                    solver_state.step_size,
+                ),
             )
             delta_primal, delta_primal_product, delta_dual = compute_next_solution(
                 problem, solver_state, step_size, extrapolation_coefficient
@@ -959,7 +968,10 @@ class raPDHG(abc.ABC):
         logger.info("Preconditioning Time (seconds): %.2e", precondition_time)
 
         solver_state, last_restart_info = self.initialize_solver_status(
-            scaled_problem, initial_primal_solution, initial_dual_solution
+            scaled_problem,
+            initial_primal_solution,
+            initial_dual_solution,
+            original_problem.is_lp,
         )
 
         # Iteration loop
