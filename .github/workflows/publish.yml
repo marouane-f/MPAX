@@ -12,4 +12,6 @@ jobs:
         uses: JRubics/poetry-publish@v2.1
         with:
           repository_name: "mpax"
+          python_version: 3.12
+          poetry_version: latest
           pypi_token: ${{ secrets.PYPI_TOKEN }}
