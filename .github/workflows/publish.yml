@@ -1,36 +1,15 @@
-name: Publish to PyPI
-
+name: Publish package to PyPI
 on:
-  release:
-    types: [created]
-
+  push:
+    tags:
+      - "v*.*.*"
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      # Step 1: Checkout the code
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Step 2: Set up Python environment
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v3
+      - name: Build and publish to pypi
+        uses: JRubics/poetry-publish@v2.1
         with:
-          python-version: '3.x'
-
-      # Step 3: Install Poetry
-      - name: Install Poetry
-        uses: abatilo/actions-poetry@v2
-
-      # Step 4: Configure Poetry for PyPI
-      - name: Configure Poetry
-        run: poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
-
-      # Step 5: Install dependencies
-      - name: Install dependencies
-        run: poetry install
-
-      # Step 6: Build and publish to PyPI
-      - name: Publish to PyPI
-        run: poetry publish --build
+          repository_name: "mpax"
+          pypi_token: ${{ secrets.PYPI_TOKEN }}
