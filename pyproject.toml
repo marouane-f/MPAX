@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mpax"
-version = "0.2.1"
+version = "0.2.2"
 description = "MPAX: Mathematical Programming in JAX"
 authors = ["Zedong Peng <zdpeng95@gmail.com>"]
 license = "MIT"
@@ -8,9 +8,9 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-numpy = ">1.24.4, <2.3"
-jax = "^0.4.35"
-chex = "^0.1.87"
+numpy = ">1.24.4"
+jax = ">=0.4.38"
+chex = ">=0.1.87"
 
 
 [tool.poetry.group.dev.dependencies]
