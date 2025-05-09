@@ -10,7 +10,7 @@ readme = "README.md"
 python = ">=3.10"
 numpy = ">1.24.4"
 jax = [
-    {version = ">=0.5.3", markers = 'not (sys_platform == "darwin" and platform_machine == "x86_64")'},
+    {version = ">=0.5.3", markers = 'sys_platform != "darwin" or platform_machine != "x86_64"'},
     {version = "==0.4.38", markers = 'sys_platform == "darwin" and platform_machine == "x86_64"'}
 ]
 chex = ">=0.1.87"
