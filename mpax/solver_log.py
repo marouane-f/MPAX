@@ -187,23 +187,32 @@ def display_problem_details(qp: QuadraticProgrammingProblem) -> None:
         The quadratic programming problem object containing the matrix and vector details.
     """
     if logging.root.level == logging.INFO:
+        if isinstance(qp.constraint_matrix, (BCOO, BCSR)):
+            constraint_matrix_nnz_count = len(qp.constraint_matrix.data)
+            constraint_matrix_data = qp.constraint_matrix.data
+        else:
+            constraint_matrix_nnz_count = jnp.count_nonzero(qp.constraint_matrix)
+            constraint_matrix_data = qp.constraint_matrix
+        if isinstance(qp.objective_matrix, (BCOO, BCSR)):
+            objective_matrix_data = qp.objective_matrix.data
+        else:
+            objective_matrix_data = qp.objective_matrix
         jax_debug_log(
             "There are {:d} variables, {:d} constraints (including {:d} equalities) and {:d} nonzero coefficients.",
-            qp.constraint_matrix.shape[1],
-            qp.constraint_matrix.shape[0],
+            qp.num_variables,
+            qp.num_constraints,
             qp.num_equalities,
-            len(qp.constraint_matrix.data),
+            constraint_matrix_nnz_count,
             logger=logger,
             level=logging.INFO,
         )
 
-        nz_constraints = qp.constraint_matrix.data
         jax_debug_log(
             "Absolute value of nonzero constraint matrix elements:\n"
             "  largest={:.6f}, smallest={:.6f}, avg={:.6f}",
-            jnp.max(jnp.abs(nz_constraints)),
-            jnp.min(jnp.abs(nz_constraints)),
-            jnp.mean(jnp.abs(nz_constraints)),
+            jnp.max(jnp.abs(constraint_matrix_data), initial=0),
+            jnp.min(jnp.abs(constraint_matrix_data), initial=0),
+            jnp.mean(jnp.abs(constraint_matrix_data)),
             logger=logger,
             level=logging.INFO,
         )
@@ -221,17 +230,15 @@ def display_problem_details(qp: QuadraticProgrammingProblem) -> None:
             level=logging.INFO,
         )
 
-        if len(qp.objective_matrix.data) > 0:
-            nz_objectives = qp.objective_matrix.data
-            jax_debug_log(
-                "Absolute value of objective matrix elements:"
-                "  largest={:.6f}, smallest={:.6f}, avg={:.6f}",
-                jnp.max(jnp.abs(nz_objectives)),
-                jnp.min(jnp.abs(nz_objectives)),
-                jnp.mean(jnp.abs(nz_objectives)),
-                logger=logger,
-                level=logging.INFO,
-            )
+        jax_debug_log(
+            "Absolute value of objective matrix elements:"
+            "  largest={:.6f}, smallest={:.6f}, avg={:.6f}",
+            jnp.max(jnp.abs(objective_matrix_data), initial=0),
+            jnp.min(jnp.abs(objective_matrix_data), initial=0),
+            jnp.mean(jnp.abs(objective_matrix_data)),
+            logger=logger,
+            level=logging.INFO,
+        )
 
         jax_debug_log(
             "Absolute value of objective vector elements:\n"
