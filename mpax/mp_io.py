@@ -183,11 +183,7 @@ def transform_to_bcoo(input_matrix):
     ValueError
         The input matrix format is not supported.
     """
-    if isinstance(input_matrix, (jnp.ndarray, np.ndarray)):
-        bcoo_matrix = BCOO.fromdense(
-            input_matrix, nse=input_matrix.shape[0] * input_matrix.shape[1]
-        )
-    elif isinstance(input_matrix, BCSR):
+    if isinstance(input_matrix, BCSR):
         bcoo_matrix = input_matrix.to_bcoo()
     elif isinstance(input_matrix, (sparray, spmatrix)):
         bcoo_matrix = BCOO.from_scipy_sparse(input_matrix)
@@ -196,8 +192,8 @@ def transform_to_bcoo(input_matrix):
     else:
         raise ValueError(
             "Unsupported matrix format. "
-            "The constraint matrix must be one of the following types: "
-            "jnp.ndarray, numpy.ndarray, BCOO, or BCSR."
+            "The sparse constraint matrix must be one of the following types: "
+            "scipy.sparse.sparray, scipy.sparse.spmatrix, BCOO, or BCSR."
         )
     return bcoo_matrix
 
