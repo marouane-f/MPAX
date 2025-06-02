@@ -12,11 +12,11 @@
 MPAX is a hardware-accelerated, differentiable, batchable, and distributable solver for mathematical programming in JAX, designed to integrate with modern computational and deep learning workflows:
 
 - **Hardware accelerated**: executes on multiple architectures including CPUs, GPUs and TPUs.
-- **Differentiable**: computes derivatives of solutions with respect to inputs through implicit or unrolled differentiation.
+- **Differentiable**: computes derivatives of solutions with respect to inputs through unrolled differentiation.
 - **Batchable**: solves multiple problem instances of the same shape simultaneously.
 - **Distributed**: executes in parallel across multiple devices, such as several GPUs.
 
-MPAX's primary motivation is to integrate mathematical programming with deep learning pipelines. To achieve this, MPAX aligns its algorithms and implementations with the requirements of deep learning hardware, ensuring compatibility with GPUs and TPUs. By being differentiable, MPAX can integrate directly into the backpropagation process of neural network training. Its batchability and distributability further enable scalable deployment in large-scale applications. 
+MPAX's primary motivation is to integrate mathematical programming with deep learning pipelines. To achieve this, MPAX aligns its algorithms and implementations with the requirements of deep learning hardware, ensuring compatibility with GPUs and TPUs. By being differentiable, MPAX can integrate directly into the backpropagation process of neural network training. Its batchability and distributability further enable scalable deployment in large-scale applications.
 
 Currently, MPAX supports **linear programming (LP)** and **quadratic programming (QP)**, the foundational problems in mathematical programming. Future releases will expand support to include other problem classes of mathematical programming.
 
