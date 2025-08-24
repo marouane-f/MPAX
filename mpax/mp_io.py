@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.experimental.sparse import BCOO, BCSR, bcoo_concatenate, empty
-from scipy.sparse import sparray, spmatrix
+from scipy.sparse import sparray, spmatrix, csr_matrix
 
 from mpax.utils import QuadraticProgrammingProblem, TwoSidedQpProblem
 
@@ -39,14 +39,14 @@ def transform_to_standard_form(qp: TwoSidedQpProblem) -> QuadraticProgrammingPro
     num_equalities = jnp.sum(is_equality_row)
 
     if num_equalities + jnp.sum(is_geq_row) + jnp.sum(is_leq_row) != len(
-        qp.constraint_lower_bound
+            qp.constraint_lower_bound
     ):
         raise ValueError("Not all constraints have finite bounds on at least one side.")
 
     # Extract row indices from BCOO format
     row_indices = qp.constraint_matrix.indices[
-        :, 0
-    ]  # First column of indices is the row indices
+                  :, 0
+                  ]  # First column of indices is the row indices
 
     # Flip the signs of the leq rows in place
     leq_nzval_mask = jnp.take(is_leq_row, row_indices)
@@ -374,7 +374,7 @@ def create_qp(Q, c, A, b, G, h, l, u, use_sparse_matrix=True):
 
 
 def create_qp_from_gurobi(
-    model, use_sparse_matrix=True, sharding=None
+        model, use_sparse_matrix=True, sharding=None
 ) -> QuadraticProgrammingProblem:
     """Transforms a gurobi model to a standard form.
 
@@ -427,6 +427,117 @@ def create_qp_from_gurobi(
 
     objective_vector = jnp.array(model.getAttr("Obj", model.getVars()))
     objective_constant = model.ObjCon
+
+    problem = QuadraticProgrammingProblem(
+        num_variables=len(var_lb),
+        num_constraints=len(constraint_rhs),
+        variable_lower_bound=var_lb,
+        variable_upper_bound=var_ub,
+        isfinite_variable_lower_bound=jnp.isfinite(var_lb),
+        isfinite_variable_upper_bound=jnp.isfinite(var_ub),
+        objective_matrix=objective_matrix,
+        objective_vector=objective_vector,
+        objective_constant=objective_constant,
+        constraint_matrix=constraint_matrix,
+        constraint_matrix_t=constraint_matrix.T,
+        right_hand_side=constraint_rhs,
+        num_equalities=jnp.sum(equalities_mask),
+        equalities_mask=equalities_mask,
+        inequalities_mask=~equalities_mask,
+        is_lp=is_lp,
+    )
+    return problem
+
+
+def create_qp_from_scip(
+        scip_model, use_sparse_matrix=True, sharding=None
+) -> QuadraticProgrammingProblem:
+    """Transforms a SCIP model to a standard form.
+    Only handles LP.
+
+    Parameters
+    ----------
+    scip_model : pyscipopt.Model
+        The SCIP model to transform.
+    use_sparse_matrix : bool
+        Whether to use sparse matrix format, by default True.
+    sharding : jax.sharding.Sharding
+        The sharding to use, by default None.
+
+    Returns
+    -------
+    QuadraticProgrammingProblem
+        The standard form of the problem.
+    """
+    all_conss = scip_model.getConss(True)
+    N_cons = scip_model.getNConss()
+    leq_mask = np.zeros(N_cons, dtype=bool)
+    equalities_mask = np.zeros(N_cons, dtype=bool)
+    constraint_rhs = np.zeros(N_cons, dtype=float)
+
+    N_vars = scip_model.getNVars()
+    all_vars = scip_model.getVars()
+    var_name_to_index = {var.name: idx for idx, var in enumerate(all_vars)}
+
+    get_coeff = lambda cons: scip_model.getValsLinear(cons)
+    rows = []
+    cols = []
+    data = []
+
+    for c_i, cons in enumerate(all_conss):
+
+        for var_str, varcoeff in get_coeff(cons).items():
+            v_i = var_name_to_index[var_str]  # Map variable name to index
+            rows.append(c_i)  # Row index (constraint index)
+            cols.append(v_i)  # Column index (variable index)
+            data.append(varcoeff)  # Non-zero coefficient
+
+        rhs = scip_model.getRhs(cons)
+        lhs = scip_model.getLhs(cons)
+
+        # EQ
+        if rhs == lhs:
+            equalities_mask[c_i] = 1
+            constraint_rhs[c_i] = rhs
+            continue
+        # LEQ
+        elif scip_model.isInfinity(-lhs):
+            leq_mask[c_i] = 1
+            # Flip the signs of the leq rows in place
+            constraint_rhs[c_i] = -rhs
+            continue
+        # GEQ
+        constraint_rhs[c_i] = rhs
+
+    equalities_mask = jnp.array(equalities_mask)
+    leq_mask = jnp.array(leq_mask)
+    constraint_rhs = jnp.array(constraint_rhs)
+    scip_cons_matrix = csr_matrix((data, (rows, cols)), shape=(N_cons, N_vars))
+
+    if use_sparse_matrix:
+        constraint_matrix = BCOO.from_scipy_sparse(scip_cons_matrix)
+        row_indices = constraint_matrix.indices[:, 0]
+        leq_nzval_mask = jnp.take(jnp.array(leq_mask), row_indices)
+        constraint_matrix.data = jnp.where(
+            leq_nzval_mask, -constraint_matrix.data, constraint_matrix.data
+        )
+        objective_matrix = BCOO.from_scipy_sparse(csr_matrix((N_vars, N_vars)))  # Only handles LP currently
+    else:
+        constraint_matrix = jnp.array(scip_cons_matrix.toarray())
+        constraint_matrix = constraint_matrix.at[leq_mask].set(
+            -constraint_matrix[leq_mask]
+        )
+        objective_matrix = BCOO.from_scipy_sparse(csr_matrix((N_vars, N_vars)))  # Only handles LP currently
+
+    is_lp = True  # Only handles LP currently
+    if sharding is not None:
+        constraint_matrix = jax.device_put(constraint_matrix, sharding)
+
+    var_lb = jnp.array([var.getLbGlobal() for var in all_vars])  # Order may be different from Gurobi's
+    var_ub = jnp.array([var.getUbGlobal() for var in all_vars])
+
+    objective_vector = jnp.array([var.getObj() for var in all_vars])
+    objective_constant = scip_model.getObjoffset()
 
     problem = QuadraticProgrammingProblem(
         num_variables=len(var_lb),

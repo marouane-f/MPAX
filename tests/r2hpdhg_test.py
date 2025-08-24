@@ -1,6 +1,7 @@
 import timeit
 from pathlib import Path
 
+from pyscipopt import Model
 import gurobipy as gp
 import jax
 import jax.numpy as jnp
@@ -11,7 +12,7 @@ from jax.sharding import PartitionSpec as P
 from pulp import LpProblem
 from pulp2mat import convert_all
 
-from mpax.mp_io import create_lp, create_qp_from_gurobi
+from mpax.mp_io import create_lp, create_qp_from_gurobi, create_qp_from_scip
 from mpax.r2hpdhg import r2HPDHG
 
 config.update("jax_enable_x64", True)
@@ -22,6 +23,22 @@ def test_r2hpdhg():
     """Test the r2HPDHG solver on a sample LP problem."""
     gurobi_model = gp.read(pytest_cache_dir + "/gen-ip054.mps")
     lp = create_qp_from_gurobi(gurobi_model)
+    solver = r2HPDHG(eps_abs=1e-6, eps_rel=1e-6)
+    result = solver.optimize(lp)
+    objective_value = (
+        jnp.dot(lp.objective_vector, result.primal_solution) + lp.objective_constant
+    )
+
+    # Expected optimal objective value
+    expected_obj = 6.765209043e03
+    assert pytest.approx(objective_value, rel=1e-2) == expected_obj
+
+def test_r2hpdhg_scip():
+    """Test the r2HPDHG solver on a sample LP problem,
+    building the model using PySCIPOpt."""
+    scip_model = Model()
+    scip_model.readProblem(pytest_cache_dir + "/gen-ip054.mps")
+    lp = create_qp_from_scip(scip_model)
     solver = r2HPDHG(eps_abs=1e-6, eps_rel=1e-6)
     result = solver.optimize(lp)
     objective_value = (
