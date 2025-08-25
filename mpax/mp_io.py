@@ -450,7 +450,7 @@ def create_qp_from_gurobi(
 
 
 def create_qp_from_scip(
-        scip_model, use_sparse_matrix=True, sharding=None
+        scip_model, trans_pb=False, use_sparse_matrix=True, sharding=None
 ) -> QuadraticProgrammingProblem:
     """Transforms a SCIP model to a standard form.
     Only handles LP.
@@ -469,14 +469,14 @@ def create_qp_from_scip(
     QuadraticProgrammingProblem
         The standard form of the problem.
     """
-    all_conss = scip_model.getConss(True)
-    N_cons = scip_model.getNConss()
+    all_conss = scip_model.getConss(trans_pb)
+    N_cons = scip_model.getNConss(trans_pb)
     leq_mask = np.zeros(N_cons, dtype=bool)
     equalities_mask = np.zeros(N_cons, dtype=bool)
     constraint_rhs = np.zeros(N_cons, dtype=float)
 
-    N_vars = scip_model.getNVars()
-    all_vars = scip_model.getVars()
+    N_vars = scip_model.getNVars(trans_pb)
+    all_vars = scip_model.getVars(trans_pb)
     var_name_to_index = {var.name: idx for idx, var in enumerate(all_vars)}
 
     get_coeff = lambda cons: scip_model.getValsLinear(cons)
@@ -527,7 +527,7 @@ def create_qp_from_scip(
         constraint_matrix = constraint_matrix.at[leq_mask].set(
             -constraint_matrix[leq_mask]
         )
-        objective_matrix = BCOO.from_scipy_sparse(csr_matrix((N_vars, N_vars)))  # Only handles LP currently
+        objective_matrix = jnp.array(csr_matrix((N_vars, N_vars)).toarray())
 
     is_lp = True  # Only handles LP currently
     if sharding is not None:
