@@ -450,7 +450,7 @@ def create_qp_from_gurobi(
 
 
 def create_qp_from_scip(
-        scip_model, trans_pb=False, use_sparse_matrix=True, sharding=None
+        scip_model, transf_pb=False, use_sparse_matrix=True, sharding=None
 ) -> QuadraticProgrammingProblem:
     """Transforms a SCIP model to a standard form.
     Only handles LP.
@@ -458,7 +458,9 @@ def create_qp_from_scip(
     Parameters
     ----------
     scip_model : pyscipopt.Model
-        The SCIP model to transform.
+        The SCIP model to transform to a QuadraticProgrammingProblem instance.
+    transf_pb : bool
+        Whether to use the transformed or original problem, by default False.
     use_sparse_matrix : bool
         Whether to use sparse matrix format, by default True.
     sharding : jax.sharding.Sharding
@@ -469,14 +471,14 @@ def create_qp_from_scip(
     QuadraticProgrammingProblem
         The standard form of the problem.
     """
-    all_conss = scip_model.getConss(trans_pb)
-    N_cons = scip_model.getNConss(trans_pb)
+    all_conss = scip_model.getConss(transf_pb)
+    N_cons = scip_model.getNConss(transf_pb)
     leq_mask = np.zeros(N_cons, dtype=bool)
     equalities_mask = np.zeros(N_cons, dtype=bool)
     constraint_rhs = np.zeros(N_cons, dtype=float)
 
-    N_vars = scip_model.getNVars(trans_pb)
-    all_vars = scip_model.getVars(trans_pb)
+    N_vars = scip_model.getNVars(transf_pb)
+    all_vars = scip_model.getVars(transf_pb)
     var_name_to_index = {var.name: idx for idx, var in enumerate(all_vars)}
 
     get_coeff = lambda cons: scip_model.getValsLinear(cons)
@@ -488,8 +490,8 @@ def create_qp_from_scip(
 
         for var_str, varcoeff in get_coeff(cons).items():
             v_i = var_name_to_index[var_str]  # Map variable name to index
-            rows.append(c_i)  # Row index (constraint index)
-            cols.append(v_i)  # Column index (variable index)
+            rows.append(c_i)  # Row index
+            cols.append(v_i)  # Column index
             data.append(varcoeff)  # Non-zero coefficient
 
         rhs = scip_model.getRhs(cons)
